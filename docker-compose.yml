@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  sync:
+  mirror:
     build: .
     volumes:
       - ./logs:/app/logs
@@ -16,7 +16,7 @@ services:
       retries: 3
 
   # Development service for testing
-  sync-dev:
+  mirror-dev:
     build: .
     volumes:
       - .:/app

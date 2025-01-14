@@ -1,0 +1,3 @@
+# Copy this into your .env file:
+
+JIRA_TO_AIRTABLE_FIELD_MAP={"key":"fldUQtDhdyjmP6wYq","summary":"fldf6Zuw6DuztuuxH","description":"fldMojFyPaoE62iVG","reporter":"fldkfFMK3PzOZyOuC","assignee":"fldNY8da3TNfuD9i0","issuetype":"fldQQ9sF3RaOijIlJ","status":"fldceii2kXU97vPY9","parent":"fldOzd4aHFR1RkQp3","created":"fldyqGWJcluIQQHpV","updated":"fldRmPLVKnZlZPIEu","resolutiondate":"fldH0i9ui1IUj9uoz","customfield_10016":"fldGOl1crrsXRfNtX"}

@@ -1,101 +1,167 @@
-# Jira to Airtable Sync Integration
+# Jira to Airtable Mirror
 
 ## Overview
-This tool synchronizes Jira issues with an Airtable base, providing a flexible and configurable way to keep project tracking data in sync.
+This tool maintains a live mirror of your Jira issues in Airtable, providing a flexible and configurable way to keep your Airtable base in sync with Jira. Key features include:
+- Continuous one-way synchronization from Jira to Airtable
+- Smart upserting of records based on Jira issue key
+- Support for parent-child issue relationships
+- Configurable field mappings
+- Docker support for easy deployment
+- Scheduled updates with configurable intervals
 
 ## Prerequisites
-- Python 3.8+
-- Jira Cloud account
-- Airtable account
+- Python 3.8+ (if running locally)
+- Docker (if running containerized)
+- Jira Cloud account with API access
+- Airtable account with API access
 
-## Installation
+## Quick Start with Docker
+1. Clone the repository
+2. Copy `.env.example` to `.env` and configure your environment variables
+3. Run with Docker:
+   ```bash
+   # Build the image
+   docker build -t jira-airtable-mirror .
+   
+   # Run once
+   docker run --env-file .env jira-airtable-mirror --no-schedule
+   
+   # Or run scheduled
+   docker run --env-file .env jira-airtable-mirror --schedule
+   ```
+
+## Local Installation
 1. Clone the repository
 2. Create a virtual environment:
-   ```
+   ```bash
    python3 -m venv venv
-   source venv/bin/activate
+   source venv/bin/activate  # On Windows: .\venv\Scripts\activate
    ```
 3. Install dependencies:
-   ```
+   ```bash
    pip install -r requirements.txt
    ```
-4. Copy `.env.example` to `.env` and fill in your credentials
+4. Copy `.env.example` to `.env` and configure your environment variables
 
 ## Configuration
-### Airtable Personal Access Token (PAT)
-1. Go to your Airtable account settings
-2. Click "Create new token"
-3. Name your token (e.g., "jira-airtable-sync")
-4. Enable the following required scopes:
-   - `data.records:read` - Required to check existing records
-   - `data.records:write` - Required to create and update records
-   - `schema.bases:read` - Required to verify table structure
-5. Select the base(s) you want to sync with
-6. Copy the generated token (starts with "pat.")
 
-The other scopes (`data.recordComments`, `schema.bases:write`, `webhook:manage`, `block:manage`) are not needed for this integration.
+1. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
 
-### Environment Variables
-Edit the `.env` file to configure:
-- Jira credentials and project
-- Airtable credentials
-- Sync interval
-- Field mappings
+2. Configure your environment variables:
+   ```env
+   JIRA_SERVER=https://your-domain.atlassian.net
+   JIRA_USERNAME=your_email@example.com
+   JIRA_API_TOKEN=your_jira_api_token
+   JIRA_PROJECT_KEY=PROJECT
+   JIRA_JQL_FILTER=project = PROJECT
 
-## Running the Sync
-```
-python sync.py
-# Or for scheduled runs
-python sync.py --schedule
-```
+   AIRTABLE_API_KEY=your_airtable_pat
+   AIRTABLE_BASE_ID=your_base_id
+   AIRTABLE_TABLE_NAME=Your Table Name  # The actual table name, not ID
 
-## Docker Support
-### Development
-To run the sync tool in development mode:
+   SYNC_INTERVAL_MINUTES=5
+
+   # Field Mappings (JSON string)
+   # Map Jira fields to Airtable column IDs (not names)
+   # Get column IDs from: https://airtable.com/developers/web/api/get-base-schema
+   JIRA_TO_AIRTABLE_FIELD_MAP={
+     "key": "fldXXXXXXXXXXXXXX",        # Issue Key
+     "summary": "fldYYYYYYYYYYYYYY",     # Summary
+     "description": "fldZZZZZZZZZZZZZZ"  # Description
+   }
+   ```
+
+## Validation Scripts
+
+Before running the sync, validate your configuration:
+
+1. **Test Connections**:
+   ```bash
+   # Test Jira connection
+   python scripts/test_jira_connection.py
+
+   # Test Airtable connection
+   python scripts/test_airtable_connection.py
+   ```
+
+2. **Validate Schema**:
+   ```bash
+   # Verify field mappings match Airtable schema
+   python scripts/validate_schema.py
+   ```
+
+3. **Test Sync**:
+   ```bash
+   # Dry run of sync process
+   python scripts/test_sync.py
+   ```
+
+These scripts will help you:
+- Verify API credentials
+- Confirm field mapping correctness
+- Test the sync process without writing data
+- Debug any configuration issues
+
+## Local Development
+
+### Running with Docker
+
 ```bash
-# Build and run once
-docker-compose --profile dev up --build sync-dev
+# Run once with example configuration
+docker compose --profile dev run --rm mirror-dev
 
-# Or run with your own .env file
-docker-compose --profile dev run -v /path/to/your/.env:/app/.env:ro sync-dev
+# Run production service
+docker compose --profile prod up -d mirror
 ```
 
-### Production Deployment
-1. Create your `.env` file with production credentials
-2. Run the container:
-```bash
-docker-compose up -d sync
-```
+## Cloud Deployment
 
-The sync service will:
-- Run on the schedule defined in your `.env`
-- Automatically restart on failure
-- Store logs in `./logs/sync.log`
-- Monitor container health
+This project includes Terraform configurations for deploying to AWS Lambda or Google Cloud Functions. Both options provide:
+- Serverless execution
+- Automatic scaling
+- Built-in scheduling
+- Secure secrets management
+- Cost-effective pricing (likely within free tier)
 
-### Docker Volumes
-- `./logs`: Persistent storage for log files
-- `./.env`: Configuration file (read-only)
+For detailed deployment instructions, see [terraform/README.md](terraform/README.md)
 
-### Health Checks
-The Docker container includes health checks that:
-- Verify log file existence
-- Run every 5 minutes
-- Help container orchestration systems monitor service health
-
-## Security Notes
-- Never commit `.env` file to version control
-- Use environment-specific API tokens
-- Limit API token permissions
-
-## Supported Features
-- One-way sync from Jira to Airtable
-- Configurable field mappings
-- Scheduled synchronization
-- Upsert existing records
-- Optional delete synchronization
+## Logging
+Logs are written to both console and `sync.log` file. When running with Docker, logs are preserved in a volume at `/app/logs`.
 
 ## Troubleshooting
-- Check logs in `sync.log`
-- Verify API credentials
-- Ensure network connectivity
+
+### Common Issues
+
+1. **Field Mapping Errors**
+   - Verify field IDs in Airtable by inspecting the field properties
+   - Ensure all mapped fields exist in both Jira and Airtable
+   - Check field types are compatible
+
+2. **Authentication Issues**
+   - Verify Jira API token has required permissions
+   - Ensure Airtable PAT has correct scopes and base access
+   - Check for typos in credentials
+
+3. **Parent-Child Relationship Issues**
+   - Ensure parent field in Airtable is "Link to another record" type
+   - Verify parent issues exist in Airtable before syncing child issues
+   - Check JQL ordering to process parent issues first
+
+### Debug Mode
+Enable debug logging by setting the logging level to DEBUG in `sync.py`:
+
+```python
+logging.basicConfig(
+    level=logging.DEBUG,
+    ...
+)
+```
+
+## Contributing
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
