@@ -5,7 +5,7 @@ import logging
 import click
 from dotenv import load_dotenv
 from jira import JIRA
-from pyairtable import Table
+from pyairtable import Api
 from apscheduler.schedulers.blocking import BlockingScheduler
 from typing import Dict, Any, Optional
 
@@ -34,9 +34,9 @@ class JiraAirtableSync:
         )
         
         # Airtable Connection
-        self.airtable_client = Table(
-            config['airtable_api_key'], 
-            config['airtable_base_id'], 
+        self.airtable_api = Api(config['airtable_api_key'])
+        self.airtable_table = self.airtable_api.table(
+            config['airtable_base_id'],
             config['airtable_table_name']
         )
         
@@ -116,18 +116,18 @@ class JiraAirtableSync:
                 try:
                     record = self._transform_jira_issue(issue)
                     
-                    # Upsert record based on Jira Key
-                    existing_records = self.airtable_client.first(
-                        formula=f'{{Jira Key}} = "{issue.key}"'
+                    # Search for existing record
+                    existing_records = self.airtable_table.first(
+                        formula=f"{{Jira Key}}='{issue.key}'"
                     )
                     
                     if existing_records:
                         # Update existing record
-                        self.airtable_client.update(existing_records['id'], record)
+                        self.airtable_table.update(existing_records['id'], record)
                         logger.info(f"Updated issue {issue.key}")
                     else:
                         # Create new record
-                        self.airtable_client.create(record)
+                        self.airtable_table.create(record)
                         logger.info(f"Created issue {issue.key}")
                 
                 except Exception as issue_sync_error:
