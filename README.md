@@ -110,12 +110,42 @@ These scripts will help you:
 ### Running with Docker
 
 ```bash
-# Run once with example configuration
-docker compose --profile dev run --rm mirror-dev
+# Run production service (default)
+docker compose up -d
 
-# Run production service
-docker compose --profile prod up -d mirror
+# Or run once with example configuration for testing
+docker compose --profile dev run --rm mirror-dev
 ```
+
+### Portainer Deployment
+
+Deploy using Portainer's web interface:
+
+1. **Create Stack**:
+   - Go to Stacks → Add stack
+   - Choose "Repository"
+   - Enter repository URL: `https://github.com/ryanrozich/jira-to-airtable-mirror`
+   - Set compose path to `docker-compose.yml`
+
+2. **Add Environment Variables**:
+   ```env
+   JIRA_SERVER=https://your-domain.atlassian.net
+   JIRA_USERNAME=your_email@example.com
+   JIRA_API_TOKEN=your_jira_api_token
+   JIRA_PROJECT_KEY=PROJECT
+   JIRA_JQL_FILTER=project = PROJECT
+   SYNC_INTERVAL_MINUTES=5
+   AIRTABLE_API_KEY=your_airtable_pat
+   AIRTABLE_BASE_ID=your_base_id
+   AIRTABLE_TABLE_NAME=your_table_name
+   JIRA_TO_AIRTABLE_FIELD_MAP={"key":"fldXXX",...}
+   TZ=UTC
+   ```
+
+3. **Deploy**:
+   - Click "Deploy the stack"
+   - The mirror service will start automatically
+   - Logs can be viewed in the container view
 
 ## Cloud Deployment
 
