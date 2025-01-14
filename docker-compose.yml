@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  sync:
+    build: .
+    volumes:
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    environment:
+      - TZ=UTC
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "test", "-f", "/app/logs/sync.log"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+
+  # Development service for testing
+  sync-dev:
+    build: .
+    volumes:
+      - .:/app
+    env_file:
+      - .env.example
+    profiles:
+      - dev
+    command: ["--no-schedule"]  # Run once for testing

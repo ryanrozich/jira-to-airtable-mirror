@@ -35,6 +35,40 @@ python sync.py
 python sync.py --schedule
 ```
 
+## Docker Support
+### Development
+To run the sync tool in development mode:
+```bash
+# Build and run once
+docker-compose --profile dev up --build sync-dev
+
+# Or run with your own .env file
+docker-compose --profile dev run -v /path/to/your/.env:/app/.env:ro sync-dev
+```
+
+### Production Deployment
+1. Create your `.env` file with production credentials
+2. Run the container:
+```bash
+docker-compose up -d sync
+```
+
+The sync service will:
+- Run on the schedule defined in your `.env`
+- Automatically restart on failure
+- Store logs in `./logs/sync.log`
+- Monitor container health
+
+### Docker Volumes
+- `./logs`: Persistent storage for log files
+- `./.env`: Configuration file (read-only)
+
+### Health Checks
+The Docker container includes health checks that:
+- Verify log file existence
+- Run every 5 minutes
+- Help container orchestration systems monitor service health
+
 ## Security Notes
 - Never commit `.env` file to version control
 - Use environment-specific API tokens

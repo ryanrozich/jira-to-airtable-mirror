@@ -12,7 +12,8 @@ __pycache__/
 *$py.class
 
 # Logs
-*.log
+logs/*
+!logs/.gitkeep
 
 # IDE files
 .vscode/
