@@ -22,6 +22,20 @@ This tool synchronizes Jira issues with an Airtable base, providing a flexible a
 4. Copy `.env.example` to `.env` and fill in your credentials
 
 ## Configuration
+### Airtable Personal Access Token (PAT)
+1. Go to your Airtable account settings
+2. Click "Create new token"
+3. Name your token (e.g., "jira-airtable-sync")
+4. Enable the following required scopes:
+   - `data.records:read` - Required to check existing records
+   - `data.records:write` - Required to create and update records
+   - `schema.bases:read` - Required to verify table structure
+5. Select the base(s) you want to sync with
+6. Copy the generated token (starts with "pat.")
+
+The other scopes (`data.recordComments`, `schema.bases:write`, `webhook:manage`, `block:manage`) are not needed for this integration.
+
+### Environment Variables
 Edit the `.env` file to configure:
 - Jira credentials and project
 - Airtable credentials
