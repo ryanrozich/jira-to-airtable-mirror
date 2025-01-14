@@ -289,12 +289,44 @@ def load_config():
     Load configuration from environment variables
     
     :return: Configuration dictionary
+    :raises ValueError: If any required environment variables are missing
     """
     load_dotenv()
+    
+    # Required environment variables
+    required_vars = {
+        'JIRA_SERVER': 'Jira server URL',
+        'JIRA_USERNAME': 'Jira username/email',
+        'JIRA_API_TOKEN': 'Jira API token',
+        'JIRA_PROJECT_KEY': 'Jira project key',
+        'AIRTABLE_API_KEY': 'Airtable API key',
+        'AIRTABLE_BASE_ID': 'Airtable base ID',
+        'AIRTABLE_TABLE_NAME': 'Airtable table name',
+        'JIRA_TO_AIRTABLE_FIELD_MAP': 'Field mapping JSON'
+    }
+    
+    # Check for missing or empty required variables
+    missing_vars = []
+    for var, description in required_vars.items():
+        value = os.getenv(var)
+        if not value or value.strip() == '':
+            missing_vars.append(f"{var} ({description})")
+    
+    if missing_vars:
+        error_msg = "Missing required environment variables:\n- " + "\n- ".join(missing_vars)
+        logger.error(error_msg)
+        raise ValueError(error_msg)
     
     # Get max_results as integer or None
     max_results_str = os.getenv('MAX_RESULTS')
     max_results = int(max_results_str) if max_results_str else None
+    
+    try:
+        field_map = json.loads(os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP', '{}'))
+    except json.JSONDecodeError as e:
+        error_msg = f"Invalid JSON in JIRA_TO_AIRTABLE_FIELD_MAP: {str(e)}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
     
     return {
         'jira_server': os.getenv('JIRA_SERVER'),
@@ -310,7 +342,7 @@ def load_config():
         
         'sync_interval': int(os.getenv('SYNC_INTERVAL_MINUTES', '60').split('#')[0].strip()),
         
-        'field_map': json.loads(os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP', '{}'))
+        'field_map': field_map
     }
 
 @click.command()
