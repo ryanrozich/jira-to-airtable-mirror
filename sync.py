@@ -33,10 +33,8 @@ class JiraAirtableSync:
         
         # Initialize Airtable client
         self.airtable_api = Api(config['airtable_api_key'])
-        self.airtable_table = self.airtable_api.table(
-            config['airtable_base_id'],
-            config['airtable_table_name']
-        )
+        base = self.airtable_api.base(config['airtable_base_id'])
+        self.airtable_table = base.table(config['airtable_table_name'])
         
         # Initialize field mapping
         self.field_map = config.get('field_map', {})
