@@ -303,6 +303,21 @@ def load_config():
         'JIRA_TO_AIRTABLE_FIELD_MAP': 'Field mapping JSON'
     }
     
+    # Log environment variable status (safely)
+    logger.info("Checking environment variables...")
+    for var, description in required_vars.items():
+        value = os.getenv(var, '')
+        is_set = bool(value and value.strip())
+        if var.endswith('_API_TOKEN') or var.endswith('_API_KEY'):
+            # Don't log sensitive values
+            logger.info(f"✓ {var}: {'[SET]' if is_set else '[MISSING]'}")
+        else:
+            # Log non-sensitive values
+            if is_set:
+                logger.info(f"✓ {var}: {value}")
+            else:
+                logger.info(f"✗ {var}: [MISSING]")
+    
     # Check for missing or empty required variables
     missing_vars = []
     for var, description in required_vars.items():
@@ -321,12 +336,13 @@ def load_config():
     
     try:
         field_map = json.loads(os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP', '{}'))
+        logger.info(f"✓ Field mapping loaded with {len(field_map)} fields")
     except json.JSONDecodeError as e:
         error_msg = f"Invalid JSON in JIRA_TO_AIRTABLE_FIELD_MAP: {str(e)}"
         logger.error(error_msg)
         raise ValueError(error_msg)
     
-    return {
+    config = {
         'jira_server': os.getenv('JIRA_SERVER'),
         'jira_username': os.getenv('JIRA_USERNAME'),
         'jira_api_token': os.getenv('JIRA_API_TOKEN'),
@@ -342,6 +358,9 @@ def load_config():
         
         'field_map': field_map
     }
+    
+    logger.info("✓ Configuration loaded successfully")
+    return config
 
 @click.command()
 @click.option('--schedule/--no-schedule', default=False, 
