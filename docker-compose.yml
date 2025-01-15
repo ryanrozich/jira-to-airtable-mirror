@@ -1,11 +1,15 @@
 version: '3.8'
 
+volumes:
+  jira_sync_logs:
+
 services:
   mirror:
     build: .
     volumes:
-      - ./logs:/app/logs
-      - ./.env:/app/.env:ro
+      - jira_sync_logs:/app/logs:rw
+    env_file:
+      - stack.env
     environment:
       - TZ=UTC
     restart: unless-stopped
@@ -14,6 +18,11 @@ services:
       interval: 5m
       timeout: 10s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Development service for testing
   mirror-dev:

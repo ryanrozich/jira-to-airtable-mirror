@@ -2,6 +2,7 @@
 import os
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import click
 from dotenv import load_dotenv
 from jira import JIRA
@@ -16,7 +17,12 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s: %(message)s',
     handlers=[
-        logging.FileHandler('sync.log'),
+        RotatingFileHandler(
+            '/app/logs/sync.log',
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=3,
+            encoding='utf-8'
+        ),
         logging.StreamHandler()
     ]
 )
