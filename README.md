@@ -128,6 +128,8 @@ Deploy using Portainer's web interface:
    - Set compose path to `docker-compose.yml`
 
 2. **Add Environment Variables**:
+   - Click "Load variables from env file" and select your `.env` file
+   - Or manually add these required variables:
    ```env
    JIRA_SERVER=https://your-domain.atlassian.net
    JIRA_USERNAME=your_email@example.com
@@ -146,6 +148,8 @@ Deploy using Portainer's web interface:
    - Click "Deploy the stack"
    - The mirror service will start automatically
    - Logs can be viewed in the container view
+
+Note: When using Portainer, the environment variables will be automatically saved to a `stack.env` file, which is referenced in the docker-compose.yml configuration.
 
 ## Cloud Deployment
 
