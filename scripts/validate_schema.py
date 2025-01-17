@@ -25,10 +25,14 @@ def validate_schema():
         api = Api(os.getenv('AIRTABLE_API_KEY'))
         base = api.base(os.getenv('AIRTABLE_BASE_ID'))
         table = base.table(os.getenv('AIRTABLE_TABLE_NAME'))
-        schema = table.schema
         
-        # Get field IDs from schema
-        field_ids = {field['id']: field['name'] for field in schema['fields']}
+        # Get field IDs by making a minimal request
+        schema = table.schema()
+        field_ids = {}
+        
+        # Extract field information from schema
+        for field in schema.fields:
+            field_ids[field.id] = field.name
         
         # Validate each mapped field
         invalid_fields = []
@@ -47,7 +51,9 @@ def validate_schema():
                 print(f"  - {field_name}: {field_id}")
             return False
         
+        print("\n✅ All field mappings are valid!")
         return True
+        
     except Exception as e:
         print(f"❌ Failed to validate schema: {str(e)}")
         return False

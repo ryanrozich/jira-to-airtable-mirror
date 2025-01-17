@@ -1,27 +1,40 @@
-FROM python:3.9-slim
+# Use Python base image for local development
+FROM python:3.9-slim AS base
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first to leverage Docker cache
+# Copy requirements file
 COPY requirements.txt .
+
+# Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
-COPY . .
+# Copy environment files if they exist
+COPY .env* ./
 
-# Create volume for logs
-VOLUME ["/app/logs"]
+# Copy function code
+COPY sync.py .
+COPY scripts ./scripts/
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
+# Create logs directory
+RUN mkdir -p logs && chmod 777 logs
 
-# Run the sync script
-ENTRYPOINT ["python", "sync.py"]
-CMD ["--schedule"]
+# Default command for local development
+CMD ["python", "sync.py"]
+
+# Lambda-specific build
+FROM public.ecr.aws/lambda/python:3.9 AS lambda
+
+# Copy requirements.txt
+COPY requirements.txt ${LAMBDA_TASK_ROOT}/
+
+# Install the specified packages
+RUN pip install -r requirements.txt
+
+# Copy function code
+COPY app.py ${LAMBDA_TASK_ROOT}/app.py
+COPY sync.py ${LAMBDA_TASK_ROOT}/sync.py
+
+# Set the CMD to your handler
+CMD [ "app.handler" ]

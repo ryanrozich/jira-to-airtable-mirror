@@ -1,0 +1,34 @@
+# AWS Configuration
+aws_region = "us-west-2"  # Change to your preferred region
+ecr_repository_name = "jira-to-airtable-mirror"  # Name for your ECR repository
+
+# Jira Configuration
+jira_server = "https://your-domain.atlassian.net"
+jira_username = "your.email@company.com"
+jira_project_key = "PROJ"
+jira_jql_filter = "project = PROJ"  # Customize this JQL filter
+
+# Airtable Configuration
+airtable_base_id = "appXXXXXXXXXXXXXX"  # Found in your Airtable base URL
+airtable_table_name = "Your Table Name"
+
+# AWS Secrets Manager ARNs
+jira_api_token_secret_arn = "arn:aws:secretsmanager:region:account:secret:jira-api-token-xxx"
+airtable_api_key_secret_arn = "arn:aws:secretsmanager:region:account:secret:airtable-api-key-xxx"
+
+# Sync Configuration
+sync_interval_minutes = "5"  # How often to sync
+max_results = 1000  # Maximum number of issues to sync
+
+# Field Mapping
+jira_to_airtable_field_map = jsonencode({
+  "key": "fldXXX",           # Issue Key
+  "summary": "fldXXX",       # Summary
+  "description": "fldXXX",   # Description
+  "reporter": "fldXXX",      # Reporter
+  "assignee": "fldXXX",      # Assignee
+  "status": "fldXXX",        # Status
+  "created": "fldXXX",       # Created Date
+  "updated": "fldXXX",       # Last Updated Date
+  "parent": "fldXXX"         # Parent Issue (for subtasks)
+})

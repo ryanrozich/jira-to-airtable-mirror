@@ -35,3 +35,9 @@ variable "schedule_expression" {
   type        = string
   default     = "rate(5 minutes)"
 }
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import sys
+import json
 from dotenv import load_dotenv
 from jira import JIRA
 from pyairtable import Api
@@ -33,6 +34,9 @@ def test_sync():
         
         # Load field mappings
         field_map = json.loads(os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP', '{}'))
+        if not field_map:
+            print("❌ No field mappings found in JIRA_TO_AIRTABLE_FIELD_MAP")
+            return False
         
         # Test data transformation
         print("\nTesting data transformation (dry run):")
@@ -40,10 +44,14 @@ def test_sync():
             print(f"\nIssue {issue.key}:")
             record = {}
             for jira_field, airtable_field in field_map.items():
-                value = getattr(issue.fields, jira_field, None)
-                record[airtable_field] = str(value) if value else None
-                print(f"  {jira_field} -> {airtable_field}: {record[airtable_field]}")
+                try:
+                    value = getattr(issue.fields, jira_field, None)
+                    record[airtable_field] = str(value) if value else None
+                    print(f"  {jira_field} -> {airtable_field}: {record[airtable_field]}")
+                except AttributeError:
+                    print(f"  ⚠️ Warning: Field '{jira_field}' not found in Jira issue")
         
+        print("\n✅ Data transformation test completed successfully")
         return True
     except Exception as e:
         print(f"❌ Sync test failed: {str(e)}")

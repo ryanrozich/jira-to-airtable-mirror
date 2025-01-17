@@ -1,201 +1,252 @@
 # Jira to Airtable Mirror
 
-## Overview
-This tool maintains a live mirror of your Jira issues in Airtable, providing a flexible and configurable way to keep your Airtable base in sync with Jira. Key features include:
-- Continuous one-way synchronization from Jira to Airtable
-- Smart upserting of records based on Jira issue key
-- Support for parent-child issue relationships
-- Configurable field mappings
-- Docker support for easy deployment
-- Scheduled updates with configurable intervals
+This service synchronizes Jira issues to an Airtable base. It can be run in multiple ways:
+- As a local Docker container for development and testing
+- As a scheduled AWS Lambda function for production use
+- Directly on your local machine for development
+
+The service periodically fetches issues from Jira and updates corresponding records in Airtable, maintaining a one-way sync from Jira to Airtable.
+
+## Features
+
+- Syncs Jira issues to Airtable on a configurable schedule
+- Maps Jira fields to Airtable fields with customizable configuration
+- Supports filtering Jira issues with JQL
+- Runs as a containerized application (locally or in AWS Lambda)
+- Uses AWS Secrets Manager for secure credential storage in Lambda
+- Infrastructure managed with Terraform
+- Automated deployment with Just command runner
 
 ## Prerequisites
-- Python 3.8+ (if running locally)
-- Docker (if running containerized)
-- Jira Cloud account with API access
-- Airtable account with API access
 
-## Quick Start with Docker
-1. Clone the repository
-2. Copy `.env.example` to `.env` and configure your environment variables
-3. Run with Docker:
+### For Local Development
+- Python 3.9+
+- [Just](https://github.com/casey/just) command runner
+- Docker (optional, for container-based development)
+
+### For AWS Deployment
+- AWS CLI configured with appropriate credentials
+- Docker installed and running
+- [Just](https://github.com/casey/just) command runner
+- Terraform installed
+- AWS account with permissions for:
+  - Lambda
+  - ECR
+  - CloudWatch
+  - EventBridge
+  - Secrets Manager
+  - IAM
+
+## Initial Setup
+
+1. Clone the repository:
    ```bash
-   # Build the image
-   docker build -t jira-airtable-mirror .
-   
-   # Run once
-   docker run --env-file .env jira-airtable-mirror --no-schedule
-   
-   # Or run scheduled
-   docker run --env-file .env jira-airtable-mirror --schedule
+   git clone <repository-url>
+   cd jira-to-airtable-mirror
    ```
 
-## Local Installation
-1. Clone the repository
-2. Create a virtual environment:
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Copy `.env.example` to `.env` and configure your environment variables
-
-## Configuration
-
-1. Copy the example environment file:
+2. Copy `.env.example` to `.env` and update with your credentials and configuration:
    ```bash
    cp .env.example .env
    ```
 
-2. Configure your environment variables:
-   ```env
-   JIRA_SERVER=https://your-domain.atlassian.net
-   JIRA_USERNAME=your_email@example.com
-   JIRA_API_TOKEN=your_jira_api_token
-   JIRA_PROJECT_KEY=PROJECT
-   JIRA_JQL_FILTER=project = PROJECT
+3. Update the following variables in `.env`:
+   - `JIRA_SERVER`: Your Jira server URL (e.g., https://your-domain.atlassian.net)
+   - `JIRA_USERNAME`: Your Jira email
+   - `JIRA_API_TOKEN`: Your Jira API token
+   - `JIRA_PROJECT_KEY`: The project key to sync (e.g., PROJ)
+   - `AIRTABLE_API_KEY`: Your Airtable API key
+   - `AIRTABLE_BASE_ID`: Your Airtable base ID
+   - `AIRTABLE_TABLE_NAME`: Your Airtable table name
+   - `JIRA_TO_AIRTABLE_FIELD_MAP`: JSON mapping of Jira fields to Airtable field IDs
 
-   AIRTABLE_API_KEY=your_airtable_pat
-   AIRTABLE_BASE_ID=your_base_id
-   AIRTABLE_TABLE_NAME=Your Table Name  # The actual table name, not ID
-
-   SYNC_INTERVAL_MINUTES=5
-
-   # Field Mappings (JSON string)
-   # Map Jira fields to Airtable column IDs (not names)
-   # Get column IDs from: https://airtable.com/developers/web/api/get-base-schema
-   JIRA_TO_AIRTABLE_FIELD_MAP={
-     "key": "fldXXXXXXXXXXXXXX",        # Issue Key
-     "summary": "fldYYYYYYYYYYYYYY",     # Summary
-     "description": "fldZZZZZZZZZZZZZZ"  # Description
-   }
-   ```
-
-## Validation Scripts
-
-Before running the sync, validate your configuration:
-
-1. **Test Connections**:
+4. Validate your setup by running:
    ```bash
-   # Test Jira connection
-   python scripts/test_jira_connection.py
-
-   # Test Airtable connection
-   python scripts/test_airtable_connection.py
+   just validate-all
    ```
-
-2. **Validate Schema**:
-   ```bash
-   # Verify field mappings match Airtable schema
-   python scripts/validate_schema.py
-   ```
-
-3. **Test Sync**:
-   ```bash
-   # Dry run of sync process
-   python scripts/test_sync.py
-   ```
-
-These scripts will help you:
-- Verify API credentials
-- Confirm field mapping correctness
-- Test the sync process without writing data
-- Debug any configuration issues
+   This will:
+   - Verify all required environment variables are set
+   - Test connections to both Jira and Airtable
+   - Validate field mappings against the Airtable schema
+   - Test data transformation with sample Jira issues
+   
+   If successful, you should see all checks pass with ✅ marks. If any checks fail, review the error messages and update your configuration accordingly.
 
 ## Local Development
 
-### Running with Docker
+### Option 1: Direct Python Development
 
-```bash
-# Run production service (default)
-docker compose up -d
-
-# Or run once with example configuration for testing
-docker compose --profile dev run --rm mirror-dev
-```
-
-### Portainer Deployment
-
-Deploy using Portainer's web interface:
-
-1. **Create Stack**:
-   - Go to Stacks → Add stack
-   - Choose "Repository"
-   - Enter repository URL: `https://github.com/ryanrozich/jira-to-airtable-mirror`
-   - Set compose path to `docker-compose.yml`
-
-2. **Add Environment Variables**:
-   - Click "Load variables from env file" and select your `.env` file
-   - Or manually add these required variables:
-   ```env
-   JIRA_SERVER=https://your-domain.atlassian.net
-   JIRA_USERNAME=your_email@example.com
-   JIRA_API_TOKEN=your_jira_api_token
-   JIRA_PROJECT_KEY=PROJECT
-   JIRA_JQL_FILTER=project = PROJECT
-   SYNC_INTERVAL_MINUTES=5
-   AIRTABLE_API_KEY=your_airtable_pat
-   AIRTABLE_BASE_ID=your_base_id
-   AIRTABLE_TABLE_NAME=your_table_name
-   JIRA_TO_AIRTABLE_FIELD_MAP={"key":"fldXXX",...}
-   TZ=UTC
+1. Run the sync process:
+   ```bash
+   just run  # Run once
+   # or
+   just run-scheduled  # Run continuously on a schedule
    ```
 
-3. **Deploy**:
-   - Click "Deploy the stack"
-   - The mirror service will start automatically
-   - Logs can be viewed in the container view
+   This will automatically:
+   - Create a virtual environment if it doesn't exist
+   - Install dependencies in the virtual environment
+   - Run the sync script
 
-Note: When using Portainer, the environment variables will be automatically saved to a `stack.env` file, which is referenced in the docker-compose.yml configuration.
+2. Validate your setup:
+   ```bash
+   just validate-all  # Run all validation scripts
+   ```
 
-## Cloud Deployment
+### Option 2: Local Docker Development
 
-This project includes Terraform configurations for deploying to AWS Lambda or Google Cloud Functions. Both options provide:
-- Serverless execution
-- Automatic scaling
-- Built-in scheduling
-- Secure secrets management
-- Cost-effective pricing (likely within free tier)
+1. Build and run with Docker:
+   ```bash
+   just docker-build  # Build the image
+   just docker-run   # Run the container
+   ```
 
-For detailed deployment instructions, see [terraform/README.md](terraform/README.md)
+2. View logs:
+   ```bash
+   just docker-logs  # Follow container logs
+   ```
 
-## Logging
-Logs are written to both console and `sync.log` file. When running with Docker, logs are preserved in a volume at `/app/logs`.
+3. Stop the container:
+   ```bash
+   just docker-stop
+   ```
+
+## AWS Lambda Deployment
+
+### 1. Set Up AWS Resources
+
+1. Create AWS Secrets:
+   ```bash
+   # Create Jira API token secret
+   aws secretsmanager create-secret \
+     --name jira-api-token \
+     --secret-string "your-jira-token"
+
+   # Create Airtable API key secret
+   aws secretsmanager create-secret \
+     --name airtable-api-key \
+     --secret-string "your-airtable-key"
+   ```
+
+2. Copy and configure Terraform backend:
+   ```bash
+   cd terraform/aws
+   cp backend.tf.example backend.tf
+   # Edit backend.tf with your S3 bucket details
+   ```
+
+3. Create `terraform.tfvars`:
+   ```hcl
+   aws_region = "us-west-2"
+   jira_server = "https://your-org.atlassian.net"
+   jira_username = "your-email@example.com"
+   jira_project_key = "PROJECT"
+   jira_jql_filter = "project = PROJECT"
+   airtable_base_id = "your-base-id"
+   airtable_table_name = "Your Table"
+   sync_interval_minutes = "10"
+   jira_api_token_secret_arn = "arn:aws:secretsmanager:region:account:secret:jira-api-token-xxx"
+   airtable_api_key_secret_arn = "arn:aws:secretsmanager:region:account:secret:airtable-api-key-xxx"
+   jira_to_airtable_field_map = jsonencode({
+     key = "fldXXX"
+     summary = "fldYYY"
+     # ... add other field mappings
+   })
+   ```
+
+### 2. Deploy to AWS
+
+1. Initialize Terraform:
+   ```bash
+   just terraform-init
+   ```
+
+2. Deploy the Lambda function:
+   ```bash
+   just lambda-deploy
+   ```
+
+3. Test the deployment:
+   ```bash
+   just lambda-invoke  # Trigger the function manually
+   just lambda-logs   # View the logs
+   ```
+
+## Available Just Commands
+
+The `justfile` provides several commands to streamline development and deployment:
+
+### Local Development
+- `just run` - Run the sync once locally (auto-creates venv)
+- `just run-scheduled` - Run the sync on a schedule locally (auto-creates venv)
+- `just validate-all` - Run all validation scripts
+- `just clean` - Clean up temporary files
+
+### Docker Commands
+- `just docker-build` - Build the Docker image
+- `just docker-run` - Run the container locally
+- `just docker-stop` - Stop the container
+- `just docker-logs` - View container logs
+- `just docker-clean` - Clean up Docker resources
+
+### AWS Lambda Commands
+- `just terraform-init` - Initialize Terraform
+- `just lambda-deploy` - Build and deploy the Lambda function
+- `just lambda-invoke` - Manually trigger the Lambda function
+- `just lambda-logs` - View Lambda logs
+- `just lambda-image` - View Lambda container image details
+- `just lambda-update` - Update Lambda configuration
+
+## Monitoring
+
+### Local Monitoring
+- Check logs in the `logs` directory
+- View Docker container logs with `just docker-logs`
+- Monitor process output in the terminal
+
+### AWS Lambda Monitoring
+- View logs in CloudWatch Logs
+- Monitor Lambda metrics in CloudWatch Metrics
+- Set up CloudWatch Alarms for error conditions
+- Check EventBridge for scheduled trigger status
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Field Mapping Errors**
-   - Verify field IDs in Airtable by inspecting the field properties
-   - Ensure all mapped fields exist in both Jira and Airtable
+1. Authentication Errors:
+   - Check Jira API token and Airtable API key
+   - Verify AWS Secrets Manager values
+   - Ensure Lambda has correct IAM permissions
+
+2. Field Mapping Errors:
+   - Validate Airtable field IDs with `just validate-schema`
    - Check field types are compatible
+   - Ensure required fields are mapped
+   - Make sure JSON field map is not wrapped in quotes in .env
 
-2. **Authentication Issues**
-   - Verify Jira API token has required permissions
-   - Ensure Airtable PAT has correct scopes and base access
-   - Check for typos in credentials
+3. Environment Issues:
+   - Ensure .env file exists for local development
+   - Check that JQL filter is properly quoted if it contains spaces
+   - Verify virtual environment is working (just run will create if needed)
 
-3. **Parent-Child Relationship Issues**
-   - Ensure parent field in Airtable is "Link to another record" type
-   - Verify parent issues exist in Airtable before syncing child issues
-   - Check JQL ordering to process parent issues first
+4. Deployment Issues:
+   - Check AWS credentials and permissions
+   - Verify Terraform configuration
+   - Check Docker build logs
 
-### Debug Mode
-Enable debug logging by setting the logging level to DEBUG in `sync.py`:
+### Debug Steps
 
-```python
-logging.basicConfig(
-    level=logging.DEBUG,
-    ...
-)
-```
+1. Run validation scripts:
+   ```bash
+   just validate-all
+   ```
 
-## Contributing
-Contributions are welcome! Please feel free to submit a Pull Request.
+2. Check logs:
+   - Local: Check `logs/sync.log`
+   - Docker: `just docker-logs`
+   - Lambda: `just lambda-logs`
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+MIT License - See LICENSE file for details

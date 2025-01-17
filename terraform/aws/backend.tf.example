@@ -1,0 +1,12 @@
+terraform {
+  backend "s3" {
+    # Replace these values with your own S3 bucket details
+    bucket = "your-terraform-state-bucket"
+    key    = "terraform.tfstate"
+    region = "us-west-2"
+    
+    # Recommended: Enable encryption and versioning on your S3 bucket
+    encrypt = true
+    # dynamodb_table = "terraform-state-lock" # Uncomment to use DynamoDB for state locking
+  }
+}

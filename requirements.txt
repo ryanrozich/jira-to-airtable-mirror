@@ -5,3 +5,6 @@ click==8.1.7
 apscheduler==3.10.4
 requests==2.31.0
 python-dateutil==2.8.2
+
+# Cloud Provider SDKs (Optional - only needed for AWS deployment)
+boto3>=1.28.0

@@ -1,28 +1,66 @@
-# Environment files
-stack.env
-*.env
-
-# Virtual environment
-venv/
-.venv/
-
-# Python cache files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
 # Logs
-logs/*
-!logs/.gitkeep
+logs/
+*.log
 
-# IDE files
-.vscode/
-.idea/
+# Local Development
+.env
+.env.*
+!.env.example
 
-# Packaging
-*.egg-info/
-dist/
-build/
+# Build Artifacts
+function.tar
+metadata.json
+output.json
+
+# Old Deployment Scripts
+deploy.sh
+ecr-login.sh
+manage-aws.sh
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+backend.tf
+!backend.tf.example
+.terraform.lock.hcl
+
+# Docker
+.docker/
 
 # Miscellaneous
 .DS_Store

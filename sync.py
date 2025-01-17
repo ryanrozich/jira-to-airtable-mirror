@@ -18,7 +18,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s: %(message)s',
     handlers=[
         RotatingFileHandler(
-            '/app/logs/sync.log',
+            '/tmp/sync.log',
             maxBytes=10*1024*1024,  # 10MB
             backupCount=3,
             encoding='utf-8'
@@ -288,14 +288,71 @@ class JiraAirtableSync:
             logger.error(f"❌ Sync failed: {str(sync_error)}")
             logger.debug("Full error details:", exc_info=True)
 
+def get_secret_from_aws(secret_arn: str) -> str:
+    """
+    Get a secret from AWS Secrets Manager
+    
+    :param secret_arn: ARN of the secret in AWS Secrets Manager
+    :return: Secret value or None if retrieval fails
+    """
+    try:
+        import boto3
+        client = boto3.client('secretsmanager')
+        response = client.get_secret_value(SecretId=secret_arn)
+        return response['SecretString']
+    except Exception as e:
+        logger.error(f"Failed to get secret from AWS: {str(e)}")
+        return None
+
+def get_secret(secret_ref: str, cloud_provider: str = None) -> str:
+    """
+    Get a secret from the appropriate source based on the reference format and environment
+    
+    :param secret_ref: Secret reference (env var value or AWS secret ARN)
+    :param cloud_provider: Cloud provider name ('aws' if specified)
+    :return: Secret value
+    """
+    if not secret_ref:
+        return None
+        
+    # If we're running in AWS Lambda, check for secret ARNs in environment
+    if cloud_provider == 'aws':
+        # Map of environment variables to their corresponding secret ARN variables
+        secret_arn_map = {
+            'JIRA_API_TOKEN': 'JIRA_API_TOKEN_SECRET_ARN',
+            'AIRTABLE_API_KEY': 'AIRTABLE_API_KEY_SECRET_ARN'
+        }
+        
+        # If this is a secret variable and we have its ARN, get from Secrets Manager
+        for secret_var, arn_var in secret_arn_map.items():
+            if secret_ref == secret_var:  # If the reference is the name of a secret var
+                secret_arn = os.getenv(arn_var)
+                if secret_arn:
+                    logger.info(f"Getting {secret_var} from AWS Secrets Manager")
+                    return get_secret_from_aws(secret_arn)
+    
+    # If it's a direct AWS secret ARN
+    if secret_ref.startswith('arn:aws:secretsmanager:'):
+        return get_secret_from_aws(secret_ref)
+    
+    # Otherwise treat as direct value
+    return secret_ref
+
 def load_config():
     """
-    Load configuration from environment variables
+    Load configuration from environment variables with support for different environments
+    
+    Supports:
+    - Local development with .env file
+    - AWS Lambda with environment variables and Secrets Manager
+    - Docker containers with environment variables
     
     :return: Configuration dictionary
     :raises ValueError: If any required environment variables are missing
     """
-    load_dotenv()
+    # Load .env file if it exists (for local development)
+    if os.path.exists('.env'):
+        load_dotenv()
     
     # Required environment variables
     required_vars = {
@@ -309,64 +366,92 @@ def load_config():
         'JIRA_TO_AIRTABLE_FIELD_MAP': 'Field mapping JSON'
     }
     
+    # Detect cloud environment
+    cloud_provider = 'aws' if os.getenv('AWS_LAMBDA_FUNCTION_NAME') else None
+    
     # Log environment variable status (safely)
+    logger.info(f"Loading configuration for environment: {'cloud-' + cloud_provider if cloud_provider else 'local'}")
     logger.info("Checking environment variables...")
+    
+    # Initialize config dictionary
+    config = {}
+    missing_vars = []
+    
     for var, description in required_vars.items():
+        # For sensitive variables in AWS Lambda, use the variable name as a reference
+        if cloud_provider == 'aws' and (var.endswith('_API_TOKEN') or var.endswith('_API_KEY')):
+            secret_value = get_secret(var, cloud_provider)
+            if secret_value:
+                config[var.lower()] = secret_value
+                logger.info(f"✓ {var}: [SECRET LOADED FROM AWS]")
+                continue
+        
+        # For all other variables, get from environment
         value = os.getenv(var, '')
         is_set = bool(value and value.strip())
-        if var.endswith('_API_TOKEN') or var.endswith('_API_KEY'):
-            # Don't log sensitive values
-            logger.info(f"✓ {var}: {'[SET]' if is_set else '[MISSING]'}")
-        else:
-            # Log non-sensitive values
-            if is_set:
+        
+        # For sensitive variables in non-Lambda environments
+        if not cloud_provider and (var.endswith('_API_TOKEN') or var.endswith('_API_KEY')):
+            secret_value = get_secret(value, cloud_provider)
+            if secret_value:
+                config[var.lower()] = secret_value
+                logger.info(f"✓ {var}: [SECRET LOADED]")
+                continue
+            elif not value:
+                missing_vars.append(f"{var} ({description})")
+                logger.info(f"✗ {var}: [MISSING]")
+                continue
+        
+        # For non-sensitive values or if not a secret reference
+        if is_set:
+            config[var.lower()] = value
+            if not var.endswith('_API_TOKEN') and not var.endswith('_API_KEY'):
                 logger.info(f"✓ {var}: {value}")
             else:
-                logger.info(f"✗ {var}: [MISSING]")
-    
-    # Check for missing or empty required variables
-    missing_vars = []
-    for var, description in required_vars.items():
-        value = os.getenv(var)
-        if not value or value.strip() == '':
+                logger.info(f"✓ {var}: [SET]")
+        else:
             missing_vars.append(f"{var} ({description})")
+            logger.info(f"✗ {var}: [MISSING]")
     
     if missing_vars:
         error_msg = "Missing required environment variables:\n- " + "\n- ".join(missing_vars)
         logger.error(error_msg)
         raise ValueError(error_msg)
     
-    # Get max_results as integer or None
-    max_results_str = os.getenv('MAX_RESULTS')
-    max_results = int(max_results_str) if max_results_str else None
-    
+    # Parse optional configurations
     try:
-        field_map = json.loads(os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP', '{}'))
-        logger.info(f"✓ Field mapping loaded with {len(field_map)} fields")
+        # Field mapping
+        if isinstance(config.get('jira_to_airtable_field_map'), str):
+            config['field_map'] = json.loads(config['jira_to_airtable_field_map'])
+        logger.info(f"✓ Field mapping loaded with {len(config['field_map'])} fields")
+        
+        # Other optional configs
+        config.update({
+            'jira_jql': os.getenv('JIRA_JQL_FILTER'),
+            'max_results': int(os.getenv('MAX_RESULTS')) if os.getenv('MAX_RESULTS') else None,
+            'sync_interval': int(os.getenv('SYNC_INTERVAL_MINUTES', '60').split('#')[0].strip()),
+        })
+        
     except json.JSONDecodeError as e:
         error_msg = f"Invalid JSON in JIRA_TO_AIRTABLE_FIELD_MAP: {str(e)}"
         logger.error(error_msg)
         raise ValueError(error_msg)
-    
-    config = {
-        'jira_server': os.getenv('JIRA_SERVER'),
-        'jira_username': os.getenv('JIRA_USERNAME'),
-        'jira_api_token': os.getenv('JIRA_API_TOKEN'),
-        'jira_project_key': os.getenv('JIRA_PROJECT_KEY'),
-        'jira_jql': os.getenv('JIRA_JQL_FILTER'),
-        'max_results': max_results,
-        
-        'airtable_api_key': os.getenv('AIRTABLE_API_KEY'),
-        'airtable_base_id': os.getenv('AIRTABLE_BASE_ID'),
-        'airtable_table_name': os.getenv('AIRTABLE_TABLE_NAME'),
-        
-        'sync_interval': int(os.getenv('SYNC_INTERVAL_MINUTES', '60').split('#')[0].strip()),
-        
-        'field_map': field_map
-    }
+    except ValueError as e:
+        error_msg = f"Invalid numeric value in configuration: {str(e)}"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
     
     logger.info("✓ Configuration loaded successfully")
     return config
+
+def sync_jira_to_airtable():
+    """
+    Main function to synchronize Jira issues to Airtable.
+    This function is called by the Lambda handler.
+    """
+    config = load_config()
+    sync = JiraAirtableSync(config)
+    sync.sync_issues()
 
 @click.command()
 @click.option('--schedule/--no-schedule', default=False, 
@@ -377,21 +462,18 @@ def main(schedule):
     
     :param schedule: Whether to run as a scheduled job
     """
-    config = load_config()
-    sync_manager = JiraAirtableSync(config)
-    
     if schedule:
         scheduler = BlockingScheduler()
         scheduler.add_job(
-            sync_manager.sync_issues, 
+            sync_jira_to_airtable, 
             'interval', 
-            minutes=config['sync_interval']
+            minutes=int(os.getenv('SYNC_INTERVAL_MINUTES', '60').split('#')[0].strip())
         )
         
-        logger.info(f"Starting scheduled sync every {config['sync_interval']} minutes")
+        logger.info(f"Starting scheduled sync every {int(os.getenv('SYNC_INTERVAL_MINUTES', '60').split('#')[0].strip())} minutes")
         scheduler.start()
     else:
-        sync_manager.sync_issues()
+        sync_jira_to_airtable()
 
 if __name__ == '__main__':
     main()

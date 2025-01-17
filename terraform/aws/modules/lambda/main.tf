@@ -6,15 +6,27 @@ resource "aws_lambda_function" "mirror" {
   memory_size   = var.memory_size
   timeout       = var.timeout
 
+  architectures = ["x86_64"]
+
   environment {
     variables = var.environment_variables
   }
+  
+  tags = var.tags
+}
+
+# CloudWatch Log Group with retention
+resource "aws_cloudwatch_log_group" "lambda" {
+  name              = "/aws/lambda/${var.app_name}"
+  retention_in_days = 30
+  tags              = var.tags
 }
 
 resource "aws_cloudwatch_event_rule" "schedule" {
   name                = "${var.app_name}-schedule"
   description         = "Schedule for Jira to Airtable sync"
   schedule_expression = var.schedule_expression
+  tags               = var.tags
 }
 
 resource "aws_cloudwatch_event_target" "lambda" {
@@ -34,6 +46,7 @@ resource "aws_lambda_permission" "allow_eventbridge" {
 # IAM Role
 resource "aws_iam_role" "lambda_role" {
   name = "${var.app_name}-lambda-role"
+  force_detach_policies = true
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -47,6 +60,12 @@ resource "aws_iam_role" "lambda_role" {
       }
     ]
   })
+
+  tags = var.tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # CloudWatch Logs policy
@@ -72,4 +91,25 @@ resource "aws_iam_role_policy" "secrets_access" {
       }
     ]
   })
+}
+
+# Outputs
+output "function_name" {
+  description = "Name of the Lambda function"
+  value       = aws_lambda_function.mirror.function_name
+}
+
+output "function_arn" {
+  description = "ARN of the Lambda function"
+  value       = aws_lambda_function.mirror.arn
+}
+
+output "role_arn" {
+  description = "ARN of the Lambda IAM role"
+  value       = aws_iam_role.lambda_role.arn
+}
+
+output "cloudwatch_log_group_name" {
+  description = "Name of the CloudWatch log group"
+  value       = aws_cloudwatch_log_group.lambda.name
 }

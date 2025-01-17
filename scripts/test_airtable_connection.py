@@ -23,9 +23,9 @@ def test_airtable_connection():
         table = base.table(os.getenv('AIRTABLE_TABLE_NAME'))
         
         # Test connection by getting table schema
-        schema = table.schema
+        schema = table.schema()
         print(f"✅ Successfully connected to Airtable table {os.getenv('AIRTABLE_TABLE_NAME')}")
-        print(f"✅ Found {len(schema['fields'])} fields in table")
+        print(f"✅ Found {len(schema.fields)} fields in table")
         
         return True
     except Exception as e:

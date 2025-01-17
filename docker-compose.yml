@@ -5,11 +5,16 @@ volumes:
 
 services:
   mirror:
-    build: .
+    build:
+      context: .
+      target: base
+    image: jira-to-airtable-mirror:local
+    container_name: jira-to-airtable-mirror
     volumes:
       - jira_sync_logs:/app/logs:rw
+      - .:/app:ro  # Mount source code for development
     env_file:
-      - stack.env
+      - .env
     environment:
       - TZ=UTC
     restart: unless-stopped
@@ -19,7 +24,7 @@ services:
       timeout: 10s
       retries: 3
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
