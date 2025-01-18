@@ -45,8 +45,9 @@ class JiraAirtableSync:
         # Initialize field mapping
         self.field_map = config.get('field_map', {})
         
-        # Validate Airtable schema before proceeding
+        # Validate Airtable schema and status field before proceeding
         self._validate_airtable_schema()
+        self._validate_status_field()
         
         # Initialize JIRA client
         self.jira_client = JIRA(
@@ -106,23 +107,104 @@ class JiraAirtableSync:
             logger.error(f"Airtable schema validation failed: {str(e)}")
             raise ValueError(f"Airtable schema validation failed: {str(e)}")
 
-    def _transform_jira_issue(self, issue) -> Dict[str, Any]:
+    def _validate_status_field(self):
         """
-        Transform Jira issue to Airtable record format
+        Validate that status field is properly mapped and exists in Airtable
+        
+        :raises ValueError: If status field mapping is invalid
+        """
+        if 'status' not in self.field_map:
+            raise ValueError("Status field must be mapped in field_map configuration")
+        
+        status_field = self.field_map['status']
+        try:
+            # Check if status field exists in Airtable
+            table_info = self.airtable_table.api.request(
+                method="GET",
+                url=f"https://api.airtable.com/v0/meta/bases/{self.config['airtable_base_id']}/tables"
+            )
+            
+            table_meta = None
+            for table in table_info["tables"]:
+                if table["name"] == self.config["airtable_table_name"]:
+                    table_meta = table
+                    break
+            
+            if not table_meta:
+                raise ValueError("Table not found in Airtable base")
+            
+            field_exists = False
+            for field in table_meta["fields"]:
+                if field["id"] == status_field:
+                    field_exists = True
+                    break
+            
+            if not field_exists:
+                raise ValueError(f"Status field '{status_field}' not found in Airtable table")
+            
+            logger.info("✅ Status field validation successful")
+            
+        except Exception as e:
+            logger.error(f"Status field validation failed: {str(e)}")
+            raise ValueError(f"Status field validation failed: {str(e)}")
+
+    def _get_issue_update_times(self, issue) -> Dict[str, Optional[str]]:
+        """
+        Get all relevant update timestamps from a Jira issue
         
         :param issue: Jira issue object
-        :return: Transformed record dictionary
+        :return: Dictionary containing different update timestamps
         """
-        record = {}
-        for jira_field, airtable_field in self.field_map.items():
-            try:
-                value = self._get_issue_field_value(issue, jira_field)
-                if value is not None:
-                    record[airtable_field] = value
-            except Exception as e:
-                logger.warning(f"Could not map field {jira_field}: {e}")
+        try:
+            update_times = {
+                'status_updated': None,
+                'comment_updated': None
+            }
+            
+            # Get status update time from changelog
+            changelog = self.jira_client.issue(issue.key, expand='changelog').changelog
+            for history in reversed(changelog.histories):
+                for item in history.items:
+                    if item.field == 'status':
+                        update_times['status_updated'] = str(history.created)
+                        break
+                if update_times['status_updated']:
+                    break
+            
+            # Get latest comment update time
+            comments = self.jira_client.comments(issue)
+            if comments:
+                update_times['comment_updated'] = str(comments[-1].updated)
+            
+            return update_times
+            
+        except Exception as e:
+            logger.error(f"Failed to get update times for issue {issue.key}: {str(e)}")
+            return {
+                'status_updated': None,
+                'comment_updated': None
+            }
+
+    def _get_latest_comment(self, issue) -> Optional[Dict[str, Any]]:
+        """
+        Get the most recent comment from a Jira issue
         
-        return record
+        :param issue: Jira issue object
+        :return: Dictionary containing comment details or None
+        """
+        try:
+            comments = self.jira_client.comments(issue)
+            if comments:
+                latest = comments[-1]
+                return {
+                    'text': latest.body,
+                    'author': latest.author.displayName,
+                    'updated': latest.updated
+                }
+            return None
+        except Exception as e:
+            logger.error(f"Failed to fetch comments for issue {issue.key}: {str(e)}")
+            return None
 
     def _get_issue_field_value(self, issue, field):
         """
@@ -185,6 +267,50 @@ class JiraAirtableSync:
             logger.error(f"Error getting field {field} from issue: {str(e)}")
             return None
 
+    def _transform_jira_issue(self, issue) -> Dict[str, Any]:
+        """
+        Transform Jira issue to Airtable record format
+        
+        :param issue: Jira issue object
+        :return: Transformed record dictionary
+        """
+        record = {}
+        
+        # Get all update timestamps
+        update_times = self._get_issue_update_times(issue)
+        
+        # Map update times to Airtable fields if configured
+        if 'status_updated' in self.field_map and update_times['status_updated']:
+            record[self.field_map['status_updated']] = update_times['status_updated']
+        
+        # Get the latest comment if configured
+        if any(field in self.field_map for field in ['latest_comment', 'comment_author', 'comment_updated']):
+            latest_comment = self._get_latest_comment(issue)
+            if latest_comment:
+                if 'latest_comment' in self.field_map:
+                    record[self.field_map['latest_comment']] = latest_comment['text']
+                if 'comment_author' in self.field_map:
+                    record[self.field_map['comment_author']] = latest_comment['author']
+                if 'comment_updated' in self.field_map:
+                    record[self.field_map['comment_updated']] = latest_comment['updated']
+        
+        # Transform other fields
+        for jira_field, airtable_field in self.field_map.items():
+            if jira_field not in ['latest_comment', 'comment_author', 'comment_updated', 
+                                'status_updated']:
+                try:
+                    value = self._get_issue_field_value(issue, jira_field)
+                    if value is not None:
+                        record[airtable_field] = value
+                        
+                        # Log status changes
+                        if jira_field == 'status':
+                            logger.info(f"Status change for {issue.key}: {value} (Updated: {update_times['status_updated']})")
+                except Exception as e:
+                    logger.warning(f"Could not map field {jira_field}: {e}")
+        
+        return record
+
     def _get_latest_update_time(self):
         """
         Get the latest update time from Airtable
@@ -211,6 +337,121 @@ class JiraAirtableSync:
             logger.error(f"Failed to get latest update time: {str(e)}")
             return None
 
+    def add_select_option(self, field_id, new_option):
+        """Add a new option to a single select field in Airtable."""
+        try:
+            logger.debug(f"Getting schema for field {field_id}")
+            # Get current schema
+            table_info = self.airtable_table.api.request(
+                method="GET",
+                url=f"https://api.airtable.com/v0/meta/bases/{self.config['airtable_base_id']}/tables"
+            )
+            logger.debug(f"Got table info: {json.dumps(table_info, indent=2)}")
+            
+            # Find our table and field
+            field_meta = None
+            table_id = None
+            for table in table_info["tables"]:
+                if table["name"] == self.config["airtable_table_name"]:
+                    table_id = table["id"]
+                    logger.debug(f"Found table {table['name']} with ID {table_id}")
+                    for field in table["fields"]:
+                        if field["id"] == field_id:
+                            field_meta = field
+                            logger.debug(f"Found field {field_id}: {json.dumps(field, indent=2)}")
+                            break
+                    break
+            
+            if not field_meta:
+                logger.error(f"Field {field_id} not found in schema")
+                return False
+                
+            if field_meta["type"] not in ['singleSelect', 'multipleSelects']:
+                logger.error(f"Field {field_id} is type {field_meta['type']}, not a select field")
+                return False
+                
+            # Get current choices and add new option if not present
+            current_choices = [choice["name"] for choice in field_meta.get("options", {}).get("choices", [])]
+            logger.debug(f"Current choices for field {field_id}: {current_choices}")
+            
+            if new_option not in current_choices:
+                current_choices.append(new_option)
+                logger.debug(f"Adding new option '{new_option}' to choices")
+                
+                # Update field options
+                update_url = f"https://api.airtable.com/v0/meta/bases/{self.config['airtable_base_id']}/tables/{table_id}/fields/{field_id}"
+                update_data = {
+                    "options": {
+                        "choices": [{"name": choice} for choice in current_choices]
+                    }
+                }
+                logger.debug(f"Updating field options at {update_url}")
+                logger.debug(f"Update payload: {json.dumps(update_data, indent=2)}")
+                
+                try:
+                    response = self.airtable_table.api.request(
+                        method="PATCH",
+                        url=update_url,
+                        json=update_data
+                    )
+                    logger.debug(f"Update response: {json.dumps(response, indent=2)}")
+                    return True
+                except Exception as e:
+                    logger.error(f"Failed to update field options: {str(e)}")
+                    if hasattr(e, 'response'):
+                        logger.error(f"Response status: {e.response.status_code}")
+                        logger.error(f"Response body: {e.response.text}")
+                    raise
+                
+            return True
+        except Exception as e:
+            logger.error(f"Failed to add select option '{new_option}' to field {field_id}: {str(e)}")
+            return False
+
+    def sync_issue(self, issue):
+        """Sync a single Jira issue to Airtable."""
+        try:
+            # Transform Jira issue to Airtable record
+            record = self._transform_jira_issue(issue)
+            
+            # Find existing record
+            existing_records = self.airtable_table.all(
+                formula=f"{{JIRA Key}} = '{issue.key}'"
+            )
+            
+            try:
+                if existing_records:
+                    self.airtable_table.update(existing_records[0]['id'], record)
+                else:
+                    self.airtable_table.create(record)
+                    
+            except Exception as e:
+                if '422 Client Error' in str(e) and 'INVALID_MULTIPLE_CHOICE_OPTIONS' in str(e):
+                    # Extract the field and value from the error
+                    error_msg = str(e)
+                    # Find the value in quotes after "select option"
+                    import re
+                    match = re.search(r'select option "([^"]+)"', error_msg)
+                    if match:
+                        value = match.group(1)
+                        # Find which field caused the error by checking the record
+                        for jira_field, field_id in self.field_map.items():
+                            if record.get(field_id) == value:
+                                # Try to add the option and retry the update
+                                if self.add_select_option(field_id, value):
+                                    if existing_records:
+                                        self.airtable_table.update(existing_records[0]['id'], record)
+                                    else:
+                                        self.airtable_table.create(record)
+                                break
+                else:
+                    raise e
+                    
+            return True
+        except Exception as e:
+            logger.error(f"Failed to sync issue {issue.key}: {str(e)}")
+            return False
+
     def sync_issues(self):
         """
         Synchronize Jira issues to Airtable
@@ -225,61 +466,101 @@ class JiraAirtableSync:
             if not jql:
                 jql = f"project = {self.config['jira_project_key']}"
             
+            logger.debug(f"Base JQL: {jql}")
+            
             # If we have a latest update time, only fetch issues updated after that time
             if latest_update:
-                # Parse the ISO datetime and convert to JQL format
-                update_dt = parser.parse(latest_update)
-                jql_date = update_dt.strftime('"%Y-%m-%d %H:%M"')
-                jql = f"({jql}) AND updated > {jql_date}"
+                try:
+                    # Parse the ISO datetime and convert to JQL format
+                    update_dt = parser.parse(latest_update)
+                    jql_date = update_dt.strftime('"%Y-%m-%d %H:%M"')
+                    logger.debug(f"Parsed update time: {update_dt}, JQL date: {jql_date}")
+                    
+                    # Check for any type of update (issue or status changes)
+                    jql = f"({jql}) AND (updated > {jql_date})"
+                except Exception as e:
+                    logger.error(f"Error parsing update time: {str(e)}")
+                    raise
             
             # Add sorting by created date in ascending order
             jql = f"{jql} ORDER BY created ASC"
+            logger.info(f"Final JQL query: {jql}")
             
-            logger.debug(f"Using JQL query: {jql}")
-            
-            # Get all issues from Jira
-            issues = self.jira_client.search_issues(
-                jql,
-                maxResults=0,
-                fields=[
-                    'summary',
-                    'description',
-                    'reporter',
-                    'assignee',
-                    'issuetype',
-                    'status',
-                    'parent',
-                    'created',
-                    'updated',
-                    'resolutiondate',
-                    'customfield_10016'
-                ]
-            )
-            logger.info(f"Found {len(issues)} issues to sync")
+            try:
+                # Get all issues from Jira with changelog for status updates
+                logger.debug("Fetching issues from Jira...")
+                issues = self.jira_client.search_issues(
+                    jql,
+                    maxResults=0,
+                    expand='changelog',  # Include changelog for status update tracking
+                    fields=[
+                        'summary',
+                        'description',
+                        'reporter',
+                        'assignee',
+                        'issuetype',
+                        'status',
+                        'parent',
+                        'created',
+                        'updated',
+                        'resolutiondate',
+                        'customfield_10016',
+                        'comment'
+                    ]
+                )
+                logger.info(f"Found {len(issues)} issues to sync")
+            except Exception as e:
+                logger.error(f"Error fetching issues from Jira: {str(e)}")
+                raise
             
             # Process each issue
             for issue in issues:
                 try:
+                    logger.debug(f"Processing issue {issue.key}...")
                     # Transform the issue to Airtable format
                     record = self._transform_jira_issue(issue)
+                    logger.debug(f"Transformed record: {json.dumps(record, indent=2)}")
                     
-                    # Look for existing record with matching key
+                    # Find existing record
                     existing_records = self.airtable_table.all(
-                        formula=f"{{{self.field_map['key']}}} = '{issue.key}'"
+                        formula=f"{{JIRA Key}} = '{issue.key}'"
                     )
                     
-                    if existing_records:
-                        # Update existing record
-                        record_id = existing_records[0]['id']
-                        logger.info(f"Updating existing record for {issue.key}")
-                        self.airtable_table.update(record_id, record)
-                    else:
-                        # Create new record
-                        logger.info(f"Creating new record for {issue.key}")
-                        self.airtable_table.create(record)
+                    try:
+                        if existing_records:
+                            logger.debug(f"Updating existing record for {issue.key}")
+                            self.airtable_table.update(existing_records[0]['id'], record)
+                        else:
+                            logger.debug(f"Creating new record for {issue.key}")
+                            self.airtable_table.create(record)
+                            
+                    except Exception as e:
+                        if '422 Client Error' in str(e) and 'INVALID_MULTIPLE_CHOICE_OPTIONS' in str(e):
+                            logger.info(f"Handling invalid choice error for {issue.key}: {str(e)}")
+                            # Extract the field and value from the error
+                            error_msg = str(e)
+                            # Find the value in quotes after "select option"
+                            import re
+                            match = re.search(r'select option "([^"]+)"', error_msg)
+                            if match:
+                                value = match.group(1)
+                                logger.debug(f"Found invalid choice value: {value}")
+                                # Find which field caused the error by checking the record
+                                for jira_field, field_id in self.field_map.items():
+                                    if record.get(field_id) == value:
+                                        logger.info(f"Adding new option '{value}' to field {field_id}")
+                                        # Try to add the option and retry the update
+                                        if self.add_select_option(field_id, value):
+                                            if existing_records:
+                                                self.airtable_table.update(existing_records[0]['id'], record)
+                                            else:
+                                                self.airtable_table.create(record)
+                                        break
+                        else:
+                            raise e
                     
                 except Exception as e:
-                    logger.error(f"Failed to sync issue {issue.key}: {str(e)}")
+                    logger.error(f"Failed to process issue {issue.key}: {str(e)}")
                     continue
             
             logger.info("✅ Sync completed successfully")

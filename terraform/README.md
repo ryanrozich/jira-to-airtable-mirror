@@ -165,6 +165,74 @@ terraform apply -var-file=staging.tfvars
    - Secrets Manager costs per secret
    - Consider adjusting `sync_interval_minutes` for cost control
 
+## Cost Monitoring
+
+You can monitor the costs of this application using several AWS tools:
+
+### 1. AWS Cost Explorer
+- Navigate to AWS Cost Explorer
+- Filter by tags:
+  - `Project = jira-to-airtable`
+  - `Environment = <your-environment>`
+- Group by service to see costs breakdown by:
+  - Lambda invocations
+  - CloudWatch Logs
+  - EventBridge events
+  - Secrets Manager
+
+### 2. CloudWatch Metrics
+To monitor Lambda usage metrics:
+1. Go to CloudWatch > Metrics > Lambda
+2. Check the following metrics for your function:
+   - Invocations (number of times the function runs)
+   - Duration (execution time)
+   - Concurrent executions
+   - Error count and success rate
+
+### 3. Cost Breakdown
+The main cost components are:
+
+#### Lambda Function
+- Free tier: 1M requests/month and 400,000 GB-seconds/month
+- Beyond free tier:
+  - $0.20 per 1M requests
+  - $0.0000166667 per GB-second
+  - Our configuration: 256MB memory, typically runs 10-30 seconds
+  - Example: At 1 invocation every 10 minutes (144/day):
+    - Monthly requests: ~4,320 (well within free tier)
+    - Monthly compute: ~36 GB-seconds (well within free tier)
+
+#### CloudWatch Logs
+- Free tier: 5GB ingestion, 5GB storage
+- Beyond free tier:
+  - $0.50 per GB ingestion
+  - $0.03 per GB storage
+- Our usage: Typically < 1MB per day of logs
+
+#### EventBridge
+- Free tier: 1M invocations/month
+- Beyond free tier: $1.00 per million events
+- Our usage: 144 events/day = ~4,320/month (well within free tier)
+
+#### Secrets Manager
+- No free tier
+- $0.40 per secret per month
+- Our usage: 2 secrets = $0.80/month
+
+### 4. Cost Optimization Tips
+1. Adjust sync frequency based on needs
+2. Set log retention periods (default 30 days)
+3. Monitor and adjust Lambda memory/timeout
+4. Use AWS Budgets to set alerts
+
+To set up cost alerts:
+1. Go to AWS Budgets
+2. Create a budget for the tagged resources
+3. Set monthly thresholds (e.g., $5)
+4. Add email notifications
+
+The application is designed to stay within AWS free tier limits for typical usage patterns. Expected monthly cost is primarily from Secrets Manager (~$0.80) unless usage is extremely high.
+
 ## Troubleshooting
 
 1. **Terraform State Issues**:
