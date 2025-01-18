@@ -12,6 +12,8 @@ The service periodically fetches issues from Jira and updates corresponding reco
 - Syncs Jira issues to Airtable on a configurable schedule
 - Maps Jira fields to Airtable fields with customizable configuration
 - Supports filtering Jira issues with JQL
+- Syncs latest comments and tracks comment history
+- Enhanced status change tracking and validation
 - Runs as a containerized application (locally or in AWS Lambda)
 - Uses AWS Secrets Manager for secure credential storage in Lambda
 - Infrastructure managed with Terraform
@@ -60,6 +62,46 @@ The service periodically fetches issues from Jira and updates corresponding reco
    - `AIRTABLE_TABLE_NAME`: Your Airtable table name
    - `JIRA_TO_AIRTABLE_FIELD_MAP`: JSON mapping of Jira fields to Airtable field IDs
 
+   Required field mappings for Jira to Airtable synchronization:
+   ```json
+   {
+     // Required fields
+     "key": "fldXXXXXXXXXXXXXX",      // Jira issue key (e.g., PROJ-123)
+     "status": "fldXXXXXXXXXXXXXX",    // Issue status
+     "summary": "fldXXXXXXXXXXXXXX",   // Issue title/summary
+     "description": "fldXXXXXXXXXXXXXX", // Issue description
+     "created": "fldXXXXXXXXXXXXXX",    // Creation timestamp
+     "updated": "fldXXXXXXXXXXXXXX",    // Last update timestamp
+     
+     // Optional fields
+     "reporter": "fldXXXXXXXXXXXXXX",   // Issue reporter
+     "assignee": "fldXXXXXXXXXXXXXX",   // Assigned user
+     "issuetype": "fldXXXXXXXXXXXXXX",  // Type of issue
+     "parent": "fldXXXXXXXXXXXXXX",     // Parent issue (for subtasks)
+     "resolutiondate": "fldXXXXXXXXXXXXXX", // When the issue was resolved
+     
+     // Update tracking fields (optional)
+     "status_updated": "fldXXXXXXXXXXXXXX",  // Last time status changed
+     
+     // Comment tracking fields (optional)
+     "latest_comment": "fldXXXXXXXXXXXXXX",  // Latest comment text
+     "comment_author": "fldXXXXXXXXXXXXXX",  // Latest comment author
+     "comment_updated": "fldXXXXXXXXXXXXXX",  // Latest comment timestamp
+     
+     // Custom fields (optional)
+     "customfield_10016": "fldXXXXXXXXXXXXXX"  // Example custom field
+   }
+   ```
+
+   Notes: 
+   - Replace `fldXXXXXXXXXXXXXX` with your actual Airtable field IDs
+     - For instructions on finding field IDs, see [Airtable's documentation](https://support.airtable.com/docs/finding-airtable-ids#finding-field-ids)
+   - Required fields must be mapped for the sync to work properly
+   - Optional fields will be synced if mapped, but can be omitted
+   - Custom fields from Jira can be mapped using their field IDs (e.g., customfield_10016)
+   - The sync process will fetch issues that have any kind of update (issue fields, status, or comments)
+   - The `updated` field tracks all changes to an issue, while `status_updated` and `comment_updated` track specific types of changes
+
 4. Validate your setup by running:
    ```bash
    just validate-all
@@ -71,6 +113,29 @@ The service periodically fetches issues from Jira and updates corresponding reco
    - Test data transformation with sample Jira issues
    
    If successful, you should see all checks pass with ✅ marks. If any checks fail, review the error messages and update your configuration accordingly.
+
+## Sync Strategy
+
+This tool uses an incremental sync approach with timestamp-based tracking to efficiently sync data between Jira and Airtable. Instead of performing full table scans on every sync, it:
+
+1. Tracks the last successful sync time in Airtable
+2. Uses Jira's `updated` field to query only for issues modified since the last sync
+3. Automatically handles new field options by adding them to Airtable select fields when encountered
+
+This incremental approach provides several benefits:
+- Reduced API calls and rate limit usage
+- Faster sync times
+- Lower computational overhead
+- Can be run frequently without performance impact
+
+### How it Works
+
+1. On each sync, the tool queries Airtable for the most recent `updated` timestamp across all records
+2. It then queries Jira using JQL: `project = X AND updated > "last_sync_time"`
+3. Only issues that have been modified (including field changes, status updates, and new comments) are processed
+4. Each issue is upserted to Airtable, with new select field options added automatically if needed
+
+This pattern ensures that syncs are efficient and can be run frequently to keep your Airtable data up to date.
 
 ## Local Development
 
