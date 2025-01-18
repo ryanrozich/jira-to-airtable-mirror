@@ -1,14 +1,15 @@
 import json
 import logging
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict
 
 from jira import JIRA
 from pyairtable import Api
 from pyairtable.formulas import match
 
+
 logger = logging.getLogger(__name__)
+
 
 class JiraAirtableSync:
     """Handles synchronization between Jira and Airtable."""

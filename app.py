@@ -1,16 +1,14 @@
-import os
 import logging
 from dotenv import load_dotenv
-import click
 from sync import sync_issues, load_config
 
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-def handler(event, context):
+def lambda_handler(event, context):
     """
-    AWS Lambda handler function that triggers the Jira to Airtable sync.
+    AWS Lambda handler function
     """
     try:
         logger.info("Starting Jira to Airtable sync")
