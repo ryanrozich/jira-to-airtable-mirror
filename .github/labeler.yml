@@ -1,0 +1,33 @@
+documentation:
+  - '**/*.md'
+  - docs/**/*
+
+dependencies:
+  - requirements.txt
+  - poetry.lock
+  - pyproject.toml
+
+github-actions:
+  - .github/**/*
+
+tests:
+  - tests/**/*
+  - '**/*_test.py'
+  - '**/*_tests.py'
+
+app-code:
+  - app.py
+  - sync.py
+
+infrastructure:
+  - '**/*.tf'
+  - '**/*.tfvars'
+  - terraform/**/*
+
+scripts:
+  - scripts/**/*
+
+build:
+  - justfile
+  - Dockerfile
+  - .dockerignore
