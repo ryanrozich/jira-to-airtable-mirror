@@ -1,42 +1,43 @@
 #!/usr/bin/env python3
 import os
 import sys
+import logging
 from dotenv import load_dotenv
 from jira import JIRA
 
+logger = logging.getLogger(__name__)
+
+
 def test_jira_connection():
-    """Test Jira connection and credentials."""
-    load_dotenv()
-    
-    # Required environment variables
-    required_vars = ['JIRA_SERVER', 'JIRA_USERNAME', 'JIRA_API_TOKEN']
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
-    
-    if missing_vars:
-        print("❌ Missing required environment variables:", ", ".join(missing_vars))
-        sys.exit(1)
-    
+    """Test connection to Jira."""
     try:
+        load_dotenv()
+
         # Initialize Jira client
         jira = JIRA(
             server=os.getenv('JIRA_SERVER'),
             basic_auth=(os.getenv('JIRA_USERNAME'), os.getenv('JIRA_API_TOKEN'))
         )
-        
-        # Test connection by getting current user
-        user = jira.current_user()
-        print(f"✅ Successfully connected to Jira as {user}")
-        
-        # Test project access
-        project_key = os.getenv('JIRA_PROJECT_KEY')
-        if project_key:
-            project = jira.project(project_key)
-            print(f"✅ Successfully accessed project {project.name} ({project.key})")
-        
+
+        # Test connection by getting server info
+        server_info = jira.server_info()
+        logger.info(f"✅ Successfully connected to Jira {server_info['version']}")
+
+        # Test JQL query
+        jql = os.getenv('JIRA_JQL_FILTER', '')
+        issues = jira.search_issues(jql, maxResults=1)
+
+        if issues:
+            logger.info(f"✅ Successfully retrieved issue {issues[0].key}")
+        else:
+            logger.warning("⚠️ No issues found with current JQL filter")
+
         return True
+
     except Exception as e:
-        print(f"❌ Failed to connect to Jira: {str(e)}")
+        logger.error(f"❌ Connection test failed: {str(e)}")
         return False
+
 
 if __name__ == '__main__':
     sys.exit(0 if test_jira_connection() else 1)

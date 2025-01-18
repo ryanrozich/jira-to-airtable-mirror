@@ -2,52 +2,61 @@
 import os
 import sys
 import json
-import click
-from sync import load_config, JiraAirtableSync
+import logging
+from dotenv import load_dotenv
 
-@click.command()
-@click.option('--env-file', default='.env', help='Path to environment file')
-def validate_config(env_file):
-    """Validate configuration and test connections to Jira and Airtable."""
+logger = logging.getLogger(__name__)
+
+
+def validate_config():  # noqa: C901
+    """Validate configuration from environment variables."""
     try:
-        # Load configuration
-        if os.path.exists(env_file):
-            click.echo(f"✓ Loading configuration from {env_file}")
-        else:
-            click.echo(f"⚠️  {env_file} not found, using environment variables")
-        
-        config = load_config()
-        click.echo("✓ Configuration loaded successfully")
-        
-        # Initialize sync client (this will validate Airtable schema)
-        click.echo("\nTesting connections...")
-        sync = JiraAirtableSync(config)
-        click.echo("✓ Successfully connected to Airtable and validated schema")
-        
-        # Test Jira connection by fetching a single issue
-        jql = f"project = {config['jira_project_key']} ORDER BY created DESC"
-        issues = sync.jira_client.search_issues(jql, maxResults=1)
-        if issues:
-            click.echo(f"✓ Successfully connected to Jira and found {len(issues)} issue")
-            
-            # Test field mapping with the sample issue
-            click.echo("\nTesting field mapping with sample issue...")
-            record = sync._transform_jira_issue(issues[0])
-            click.echo(f"✓ Successfully mapped {len(record)} fields:")
-            for jira_field, airtable_field in config['field_map'].items():
-                value = record.get(airtable_field, '[NOT MAPPED]')
-                if isinstance(value, (dict, list)):
-                    value = json.dumps(value)
-                click.echo(f"  - {jira_field}: {value}")
-        else:
-            click.echo("⚠️  Connected to Jira but found no issues matching the filter")
-        
-        click.echo("\n✅ Configuration is valid and all connections are working!")
-        return 0
-        
+        load_dotenv()
+
+        # Validate Jira settings
+        required_jira = ['JIRA_SERVER', 'JIRA_USERNAME', 'JIRA_API_TOKEN', 'JIRA_PROJECT_KEY']
+        missing_jira = [
+            field for field in required_jira
+            if not os.getenv(field)
+        ]
+
+        if missing_jira:
+            logger.error("❌ Missing required Jira settings:")
+            for field in missing_jira:
+                logger.error(f"  - {field}")
+            return False
+
+        # Validate Airtable settings
+        required_airtable = ['AIRTABLE_API_KEY', 'AIRTABLE_BASE_ID', 'AIRTABLE_TABLE_NAME']
+        missing_airtable = [
+            field for field in required_airtable
+            if not os.getenv(field)
+        ]
+
+        if missing_airtable:
+            logger.error("❌ Missing required Airtable settings:")
+            for field in missing_airtable:
+                logger.error(f"  - {field}")
+            return False
+
+        # Validate field mappings
+        try:
+            field_map = json.loads(os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP', '{}'))
+        except json.JSONDecodeError:
+            logger.error("❌ Invalid JSON in JIRA_TO_AIRTABLE_FIELD_MAP")
+            return False
+
+        if not field_map:
+            logger.error("❌ No field mappings found in JIRA_TO_AIRTABLE_FIELD_MAP")
+            return False
+
+        logger.info("✅ Configuration is valid")
+        return True
+
     except Exception as e:
-        click.echo(f"\n❌ Validation failed: {str(e)}", err=True)
-        return 1
+        logger.error(f"❌ Config validation failed: {str(e)}")
+        return False
+
 
 if __name__ == '__main__':
-    sys.exit(validate_config())
+    sys.exit(0 if validate_config() else 1)

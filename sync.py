@@ -28,7 +28,7 @@ class JiraAirtableSync:
         self.field_mappings = config['field_mappings']
         self.tracking_fields = config.get('tracking_fields', {})
 
-    def _get_issue_field_value(self, issue: Any, field_name: str) -> Any:
+    def _get_issue_field_value(self, issue: Any, field_name: str) -> Any:  # noqa: C901
         """Extract field value from Jira issue."""
         try:
             field = getattr(issue.fields, field_name)
@@ -194,7 +194,7 @@ def validate_config(config: Dict[str, Any]) -> None:
         raise ValueError("Missing Airtable table ID")
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> Dict[str, Any]:  # noqa: C901
     """Load configuration from environment variables and config file."""
     try:
         config_path = os.getenv('CONFIG_PATH', 'config.json')

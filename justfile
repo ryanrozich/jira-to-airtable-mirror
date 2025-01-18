@@ -242,3 +242,37 @@ lambda-destroy region=default_region:
 
 # Destroy everything (cleans up local resources including Docker, and destroys AWS infrastructure)
 destroy-all region=default_region: clean (lambda-destroy region)
+
+# Lint Python code with flake8
+lint: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔍 Linting Python code..."
+    source venv/bin/activate
+    pip install flake8
+    echo "Running basic error checks..."
+    flake8 app.py sync.py scripts/ --count --select=E9,F63,F7,F82 --show-source --statistics
+    echo "Running style checks..."
+    flake8 app.py sync.py scripts/ --count --max-complexity=10 --max-line-length=127 --statistics
+
+# Run CodeQL analysis locally (requires CodeQL CLI: https://github.com/github/codeql-cli-binaries)
+security-scan:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔒 Running CodeQL security scan..."
+    if ! command -v codeql &> /dev/null; then
+        echo "❌ CodeQL CLI not found. Please install it first:"
+        echo "https://github.com/github/codeql-cli-binaries"
+        exit 1
+    fi
+    
+    # Create CodeQL database
+    codeql database create .codeql-db --language=python --source-root=.
+    
+    # Run analysis
+    codeql database analyze .codeql-db \
+        --format=sarif-latest \
+        --output=codeql-results.sarif \
+        security-and-quality.qls
+    
+    echo "✅ Analysis complete. Results saved to codeql-results.sarif"
