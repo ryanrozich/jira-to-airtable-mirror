@@ -239,28 +239,31 @@ This pattern ensures that syncs are efficient and can be run frequently to keep 
 
 ## Available Just Commands
 
-The `justfile` provides several commands to streamline development and deployment:
+The `justfile` provides several commands to streamline development and deployment. Commands are organized by their prefix:
 
-### Local Development
+### Local Development (no prefix)
 - `just run` - Run the sync once locally (auto-creates venv)
 - `just run-scheduled` - Run the sync on a schedule locally (auto-creates venv)
 - `just validate-all` - Run all validation scripts
-- `just clean` - Clean up temporary files
+- `just clean` - Clean up local development resources (including Docker)
 
-### Docker Commands
+### Docker Commands (docker- prefix)
 - `just docker-build` - Build the Docker image
 - `just docker-run` - Run the container locally
 - `just docker-stop` - Stop the container
 - `just docker-logs` - View container logs
 - `just docker-clean` - Clean up Docker resources
 
-### AWS Lambda Commands
-- `just terraform-init` - Initialize Terraform
+### AWS Lambda Commands (lambda- prefix)
 - `just lambda-deploy` - Build and deploy the Lambda function
 - `just lambda-invoke` - Manually trigger the Lambda function
-- `just lambda-logs` - View Lambda logs
+- `just lambda-logs` - View Lambda logs in real-time
+- `just lambda-logs-recent [minutes]` - View recent Lambda logs (default: last 30 minutes)
 - `just lambda-image` - View Lambda container image details
-- `just lambda-update` - Update Lambda configuration
+- `just lambda-destroy` - Safely destroy all AWS infrastructure
+
+### Master Commands
+- `just destroy-all` - Clean up everything (local resources including Docker, and AWS infrastructure)
 
 ## Monitoring
 
