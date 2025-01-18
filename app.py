@@ -2,7 +2,6 @@ import logging
 from dotenv import load_dotenv
 from sync import sync_issues, load_config
 
-# Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
