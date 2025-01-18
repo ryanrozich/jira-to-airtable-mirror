@@ -64,3 +64,4 @@ backend.tf
 
 # Miscellaneous
 .DS_Store
+airtable_fields.json
