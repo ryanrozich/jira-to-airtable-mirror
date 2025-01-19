@@ -1,5 +1,5 @@
 jira==3.5.1
-pyairtable==2.2.1
+pyairtable==3.0.1
 python-dotenv==1.0.0
 click==8.1.7
 apscheduler==3.10.4
