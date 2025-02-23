@@ -11,7 +11,7 @@ from pyairtable import Api
 from pyairtable.formulas import match
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(override=True)
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -26,14 +26,14 @@ class JiraAirtableSync:
             basic_auth=(config['jira_username'], config['jira_api_token'])
         )
         self.api = Api(config['airtable_api_key'])
-        self.table = self.api.table(config['airtable_base_id'], config['airtable_table_id'])
+        self.table = self.api.table(config['airtable_base_id'], config['airtable_table_name'])
         self.project_key = config['jira_project_key']
         self.batch_size = config.get('batch_size', 50)
         self.field_mappings = config['field_mappings']
         
         # Get Jira timezone
         self.timezone = self._get_jira_timezone()
-        logger.info(f"Initializing sync from Jira project {self.project_key} to Airtable table {config['airtable_table_id']}")
+        logger.info(f"Initializing sync from Jira project {self.project_key} to Airtable table {config['airtable_table_name']}")
         logger.info(f"Jira Server: {config['jira_server']}")
         logger.info(f"Airtable Base: {config['airtable_base_id']}")
         logger.info(f"Using batch size of {self.batch_size} for Airtable operations")
@@ -824,7 +824,7 @@ def validate_config(config: Dict[str, Any]) -> None:
         'jira_api_token',
         'airtable_api_key',
         'airtable_base_id',
-        'airtable_table_id',
+        'airtable_table_name',
         'jira_project_key',
         'field_mappings'
     ]
@@ -857,7 +857,7 @@ def load_config() -> Dict[str, Any]:
         'jira_project_key': os.getenv('JIRA_PROJECT_KEY'),
         'airtable_api_key': os.getenv('AIRTABLE_API_KEY'),
         'airtable_base_id': os.getenv('AIRTABLE_BASE_ID'),
-        'airtable_table_id': os.getenv('AIRTABLE_TABLE_NAME'),  # Using TABLE_NAME instead of TABLE_ID
+        'airtable_table_name': os.getenv('AIRTABLE_TABLE_NAME'),  # Using consistent naming
         'batch_size': int(os.getenv('BATCH_SIZE', '50')),
     }
     

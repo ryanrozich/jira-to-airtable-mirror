@@ -175,13 +175,28 @@ validate-all: setup-venv
     
     . venv/bin/activate
     export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
-    python scripts/validate_config.py
-    python scripts/validate_schema.py
-    python scripts/test_jira_connection.py
-    python scripts/test_airtable_connection.py
-    python scripts/test_sync.py
     
-    echo "✅ All validation passed"
+    echo "1️⃣  Validating environment configuration..."
+    python scripts/validate_config.py
+    echo ""
+    
+    echo "2️⃣  Validating Airtable schema..."
+    python scripts/validate_schema.py
+    echo ""
+    
+    echo "3️⃣  Testing Jira connection..."
+    python scripts/test_jira_connection.py
+    echo ""
+    
+    echo "4️⃣  Testing Airtable connection..."
+    python scripts/test_airtable_connection.py
+    echo ""
+    
+    echo "5️⃣  Testing sync functionality..."
+    python scripts/test_sync.py
+    echo ""
+    
+    echo "✨ All validation tests passed successfully!"
 
 # Clean up local development resources
 clean: docker-clean

@@ -13,12 +13,20 @@ logger = logging.getLogger(__name__)
 def validate_schema() -> bool:  # noqa: C901
     """Validate that all required fields exist in Airtable with correct IDs."""
     try:
-        load_dotenv()
+        # Force override of existing environment variables
+        load_dotenv(override=True)
+
+        # Debug: Print current working directory and .env loading
+        logger.info(f"Current working directory: {os.getcwd()}")
+        logger.info(f"Looking for .env file in: {os.path.abspath('.env')}")
 
         # Initialize Airtable client
         api = Api(os.getenv('AIRTABLE_API_KEY'))
         base_id = os.getenv('AIRTABLE_BASE_ID')
         table_name = os.getenv('AIRTABLE_TABLE_NAME')
+        
+        # Debug: Print the actual table name being used
+        logger.info(f"Using table name from env: {table_name}")
 
         # Get field mappings
         field_map = json.loads(os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP', '{}'))
@@ -31,6 +39,11 @@ def validate_schema() -> bool:  # noqa: C901
             method="GET",
             url=f"https://api.airtable.com/v0/meta/bases/{base_id}/tables"
         )
+
+        # Print available tables
+        logger.info("Available tables in base:")
+        for table in table_info["tables"]:
+            logger.info(f"  - {table['name']}")
 
         # Find our table
         table_meta = None
@@ -49,7 +62,11 @@ def validate_schema() -> bool:  # noqa: C901
 
         # Check for missing fields
         missing_fields = []
-        for jira_field, field_id in field_map.items():
+        for jira_field, mapping in field_map.items():
+            field_id = mapping.get('airtable_field_id')
+            if not field_id:
+                missing_fields.append(f"{jira_field} -> missing airtable_field_id")
+                continue
             if field_id not in field_ids:
                 field_name = field_names.get(field_id, field_id)
                 missing_fields.append(f"{jira_field} -> {field_name} ({field_id})")

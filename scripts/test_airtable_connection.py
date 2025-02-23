@@ -11,12 +11,20 @@ logger = logging.getLogger(__name__)
 def test_airtable_connection():
     """Test connection to Airtable."""
     try:
-        load_dotenv()
+        # Force override of existing environment variables
+        load_dotenv(override=True)
+
+        # Debug: Print current working directory and .env loading
+        logger.info(f"Current working directory: {os.getcwd()}")
+        logger.info(f"Looking for .env file in: {os.path.abspath('.env')}")
 
         # Initialize Airtable client
         api = Api(os.getenv('AIRTABLE_API_KEY'))
         base_id = os.getenv('AIRTABLE_BASE_ID')
         table_name = os.getenv('AIRTABLE_TABLE_NAME')
+
+        # Debug: Print the actual table name being used
+        logger.info(f"Using table name from env: {table_name}")
 
         # Get table metadata
         table_info = api.request(
