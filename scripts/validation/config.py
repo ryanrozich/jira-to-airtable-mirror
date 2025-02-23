@@ -126,54 +126,32 @@ def check_field_mappings() -> Tuple[bool, str, str]:
         """
 
 def main():
+    """Run all configuration validation checks."""
     load_dotenv()
     
+    checks = [
+        ("Environment File", check_env_file()),
+        ("Jira Configuration", check_jira_config()),
+        ("Airtable Configuration", check_airtable_config()),
+        ("Field Mappings", check_field_mappings())
+    ]
+    
     all_passed = True
+    first = True
     
-    # Check .env file
-    env_passed, env_msg, env_fix = check_env_file()
-    status = "✅" if env_passed else "❌"
-    print(f"\n   {status} Environment File:")
-    print(f"      {env_msg}")
-    if not env_passed:
-        print("      How to fix:")
-        print(f"      {env_fix}")
-        sys.exit(1)
-    
-    # Check Jira config
-    jira_passed, jira_msg, missing_jira = check_jira_config()
-    status = "✅" if jira_passed else "❌"
-    print(f"\n   {status} Jira Configuration:")
-    print(f"      {jira_msg}")
-    if not jira_passed:
-        print("      Missing variables:")
-        for var in missing_jira:
-            print(f"      - {var}")
-        all_passed = False
-    
-    # Check Airtable config
-    airtable_passed, airtable_msg, missing_airtable = check_airtable_config()
-    status = "✅" if airtable_passed else "❌"
-    print(f"\n   {status} Airtable Configuration:")
-    print(f"      {airtable_msg}")
-    if not airtable_passed:
-        print("      Missing variables:")
-        for var in missing_airtable:
-            print(f"      - {var}")
-        all_passed = False
-    
-    # Check field mappings
-    mappings_passed, mappings_msg, mappings_fix = check_field_mappings()
-    status = "✅" if mappings_passed else "❌"
-    print(f"\n   {status} Field Mappings:")
-    print(f"      {mappings_msg}")
-    if not mappings_passed:
-        print("      How to fix:")
-        print(f"      {mappings_fix}")
-        all_passed = False
+    for name, (passed, message, _) in checks:
+        status = "✅" if passed else "❌"
+        if first:
+            print(f"\n   {status} {name}:")
+            first = False
+        else:
+            print(f"\n   {status} {name}:")
+        print(f"      {message}")
+        if not passed:
+            all_passed = False
     
     print()  # Add blank line at the end
-    sys.exit(0 if all_passed else 1)
+    return all_passed
 
 if __name__ == '__main__':
-    main()
+    sys.exit(0 if main() else 1)
