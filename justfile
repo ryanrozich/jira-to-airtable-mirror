@@ -25,9 +25,15 @@ docker-run:
     fi
     
     echo "📝 Using environment file: .env"
+    # Export all variables from .env file
+    set -a
+    source .env
+    set +a
+    
+    # Run the container with environment variables from the current shell
     docker run -d \
         --name {{app_name}} \
-        --env-file .env \
+        --env-file <(env | grep -E '^(JIRA_|AIRTABLE_|LOG_|SYNC_|BATCH_)') \
         {{app_name}}:local
 
 # View Docker container logs
@@ -147,6 +153,9 @@ run: setup-venv
     echo "🚀 Running {{app_name}} with Python..."
     
     . venv/bin/activate
+    set -a
+    source .env
+    set +a
     python sync.py
 
 # Run the sync script in scheduled mode (without Docker)
