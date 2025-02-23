@@ -2,16 +2,16 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Dict, List, Optional, Callable, Tuple, TypeVar, Union
 
 from dotenv import load_dotenv
 from jira import JIRA
 from pyairtable import Api
 from pyairtable.formulas import match
 
-# Load environment variables from .env file
-load_dotenv(override=True)
+from config import SyncConfig, get_config_loader
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -19,23 +19,23 @@ logger = logging.getLogger(__name__)
 class JiraAirtableSync:
     """Handles synchronization between Jira and Airtable."""
 
-    def __init__(self, config: Dict[str, Any]) -> None:
+    def __init__(self, config: SyncConfig) -> None:
         """Initialize the sync class with configuration."""
         self.jira = JIRA(
-            server=config['jira_server'],
-            basic_auth=(config['jira_username'], config['jira_api_token'])
+            server=config.jira_server,
+            basic_auth=(config.jira_username, config.jira_api_token)
         )
-        self.api = Api(config['airtable_api_key'])
-        self.table = self.api.table(config['airtable_base_id'], config['airtable_table_name'])
-        self.project_key = config['jira_project_key']
-        self.batch_size = config.get('batch_size', 50)
-        self.field_mappings = config['field_mappings']
+        self.api = Api(config.airtable_api_key)
+        self.table = self.api.table(config.airtable_base_id, config.airtable_table_name)
+        self.project_key = config.jira_project_key
+        self.batch_size = config.batch_size
+        self.field_mappings = config.field_mappings
         
         # Get Jira timezone
         self.timezone = self._get_jira_timezone()
-        logger.info(f"Initializing sync from Jira project {self.project_key} to Airtable table {config['airtable_table_name']}")
-        logger.info(f"Jira Server: {config['jira_server']}")
-        logger.info(f"Airtable Base: {config['airtable_base_id']}")
+        logger.info(f"Initializing sync from Jira project {self.project_key} to Airtable table {config.airtable_table_name}")
+        logger.info(f"Jira Server: {config.jira_server}")
+        logger.info(f"Airtable Base: {config.airtable_base_id}")
         logger.info(f"Using batch size of {self.batch_size} for Airtable operations")
         logger.info(f"Using Jira instance timezone: {self.timezone}")
         
@@ -808,78 +808,14 @@ class JiraAirtableSync:
             logger.error(f"Error during sync: {str(e)}", exc_info=True)
             raise
 
-def validate_config(config: Dict[str, Any]) -> None:
-    """
-    Validate the configuration dictionary.
-    
-    Args:
-        config: Configuration dictionary to validate
-        
-    Raises:
-        ValueError: If required configuration is missing
-    """
-    required_fields = [
-        'jira_server',
-        'jira_username',
-        'jira_api_token',
-        'airtable_api_key',
-        'airtable_base_id',
-        'airtable_table_name',
-        'jira_project_key',
-        'field_mappings'
-    ]
-
-    for field in required_fields:
-        if field not in config:
-            raise ValueError(f"Missing required configuration: {field}")
-        if not config[field]:
-            raise ValueError(f"Empty value for required configuration: {field}")
-
-    # Validate field mappings format
-    field_mappings = config['field_mappings']
-    if not isinstance(field_mappings, dict):
-        raise ValueError("field_mappings must be a dictionary")
-
-    for jira_field, airtable_info in field_mappings.items():
-        if not isinstance(airtable_info, dict):
-            raise ValueError(f"Field mapping for {jira_field} must be a dictionary with 'airtable_field_id'")
-        if 'airtable_field_id' not in airtable_info:
-            raise ValueError(f"Field mapping for {jira_field} missing 'airtable_field_id'")
-
-def load_config() -> Dict[str, Any]:
-    """
-    Load configuration from environment variables.
-    """
-    config = {
-        'jira_server': os.getenv('JIRA_SERVER'),
-        'jira_username': os.getenv('JIRA_USERNAME'),
-        'jira_api_token': os.getenv('JIRA_API_TOKEN'),
-        'jira_project_key': os.getenv('JIRA_PROJECT_KEY'),
-        'airtable_api_key': os.getenv('AIRTABLE_API_KEY'),
-        'airtable_base_id': os.getenv('AIRTABLE_BASE_ID'),
-        'airtable_table_name': os.getenv('AIRTABLE_TABLE_NAME'),  # Using consistent naming
-        'batch_size': int(os.getenv('BATCH_SIZE', '50')),
-    }
-    
-    # Load field mappings from environment variable
-    raw_mappings = json.loads(os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP', '{}'))
-    config['field_mappings'] = raw_mappings
-
-    try:
-        validate_config(config)
-        return config 
-    except Exception as e:
-        logger.error(f"Error validating config: {str(e)}", exc_info=True)
-        raise
-
-def sync_issues(config: Dict[str, Any]) -> None:
+def sync_issues(config: SyncConfig) -> None:
     """
     Main function to sync issues from Jira to Airtable.
 
     This function creates a JiraAirtableSync instance and calls its sync_issues method.
 
     Args:
-        config: Configuration dictionary
+        config: Configuration object
     """
     sync_handler = JiraAirtableSync(config)
     sync_handler.sync_issues()
@@ -896,8 +832,12 @@ if __name__ == '__main__':
     )
     
     try:
-        config = load_config()
-        validate_config(config)
+        # Get configuration based on environment
+        environment = os.getenv('ENVIRONMENT', 'local')
+        config_loader = get_config_loader(environment)
+        config = config_loader.load()
+        
+        # Run sync
         sync_handler = JiraAirtableSync(config)
         sync_handler.sync_issues()
     except Exception as e:

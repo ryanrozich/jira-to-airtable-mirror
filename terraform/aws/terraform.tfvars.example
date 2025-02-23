@@ -13,22 +13,53 @@ airtable_base_id = "appXXXXXXXXXXXXXX"  # Found in your Airtable base URL
 airtable_table_name = "Your Table Name"
 
 # AWS Secrets Manager ARNs
+# These secrets should be created manually in AWS Secrets Manager before deploying
 jira_api_token_secret_arn = "arn:aws:secretsmanager:region:account:secret:jira-api-token-xxx"
 airtable_api_key_secret_arn = "arn:aws:secretsmanager:region:account:secret:airtable-api-key-xxx"
 
 # Sync Configuration
 sync_interval_minutes = "5"  # How often to sync
 max_results = 1000  # Maximum number of issues to sync
+batch_size = 50  # Number of records to process in each batch
 
-# Field Mapping
-jira_to_airtable_field_map = jsonencode({
-  "key": "fldXXX",           # Issue Key
-  "summary": "fldXXX",       # Summary
-  "description": "fldXXX",   # Description
-  "reporter": "fldXXX",      # Reporter
-  "assignee": "fldXXX",      # Assignee
-  "status": "fldXXX",        # Status
-  "created": "fldXXX",       # Created Date
-  "updated": "fldXXX",       # Last Updated Date
-  "parent": "fldXXX"         # Parent Issue (for subtasks)
-})
+# Field Mapping - using native HCL format which will be converted to JSON string
+jira_to_airtable_field_map = <<-EOT
+{
+  "key": {
+    "airtable_field_id": "fldUQtDhdyjmP6wYq"
+  },
+  "summary": {
+    "airtable_field_id": "fldf6Zuw6DuztuuxH"
+  },
+  "description": {
+    "airtable_field_id": "fldMojFyPaoE62iVG"
+  },
+  "reporter": {
+    "airtable_field_id": "fldkfFMK3PzOZyOuC"
+  },
+  "assignee": {
+    "airtable_field_id": "fldNY8da3TNfuD9i0"
+  },
+  "issuetype": {
+    "airtable_field_id": "fldQQ9sF3RaOijIlJ"
+  },
+  "status": {
+    "airtable_field_id": "fldceii2kXU97vPY9"
+  },
+  "parent": {
+    "airtable_field_id": "fldOzd4aHFR1RkQp3"
+  },
+  "created": {
+    "airtable_field_id": "fldyqGWJcluIQQHpV"
+  },
+  "updated": {
+    "airtable_field_id": "fldRmPLVKnZlZPIEu"
+  },
+  "resolutiondate": {
+    "airtable_field_id": "fldH0i9ui1IUj9uoz"
+  },
+  "customfield_10016": {
+    "airtable_field_id": "fldGOl1crrsXRfNtX"
+  }
+}
+EOT

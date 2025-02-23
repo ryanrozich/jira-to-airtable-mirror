@@ -5,11 +5,21 @@ resource "aws_lambda_function" "mirror" {
   image_uri     = var.image_uri
   memory_size   = var.memory_size
   timeout       = var.timeout
+  image_config {
+    command           = ["app.lambda_handler"]
+    entry_point       = []
+    working_directory = "/var/task"
+  }
 
   architectures = ["x86_64"]
 
   environment {
-    variables = var.environment_variables
+    variables = merge(
+      {
+        ENVIRONMENT = "aws"
+      },
+      var.environment_variables
+    )
   }
   
   tags = var.tags

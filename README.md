@@ -114,6 +114,62 @@ The service periodically fetches issues from Jira and updates corresponding reco
    
    If successful, you should see all checks pass with ✅ marks. If any checks fail, review the error messages and update your configuration accordingly.
 
+## Configuration System
+
+The application uses a flexible configuration system that supports multiple deployment environments:
+
+### Environment Types
+
+- **Local Development**: Uses `.env` files and environment variables
+- **Docker**: Similar to local development, but runs in a container
+- **AWS Lambda**: Uses AWS Secrets Manager for sensitive data
+
+### Configuration Loaders
+
+The configuration system is based on a modular design with different loaders for each environment:
+
+```python
+# Local development
+config_loader = get_config_loader('local')
+config = config_loader.load()
+
+# Docker environment
+config_loader = get_config_loader('docker')
+config = config_loader.load()
+
+# AWS Lambda
+config_loader = get_config_loader('aws')
+config = config_loader.load()
+```
+
+The environment is controlled by the `ENVIRONMENT` environment variable, which defaults to 'local' if not set.
+
+### Required Configuration
+
+The following configuration values are required regardless of environment:
+
+- `JIRA_SERVER`: Jira server URL
+- `JIRA_USERNAME`: Jira username
+- `JIRA_API_TOKEN`: Jira API token (or secret ARN in AWS)
+- `JIRA_PROJECT_KEY`: Jira project key
+- `AIRTABLE_API_KEY`: Airtable API key (or secret ARN in AWS)
+- `AIRTABLE_BASE_ID`: Airtable base ID
+- `AIRTABLE_TABLE_NAME`: Airtable table name
+- `JIRA_TO_AIRTABLE_FIELD_MAP`: JSON mapping of Jira fields to Airtable fields
+
+Optional configuration:
+- `BATCH_SIZE`: Number of records to process in each batch (default: 50)
+- `LOG_LEVEL`: Logging level (default: INFO)
+
+### AWS Specific Configuration
+
+When running in AWS Lambda, the following environment variables are required:
+
+- `JIRA_API_TOKEN_SECRET_ARN`: ARN of the secret containing the Jira API token
+- `AIRTABLE_API_KEY_SECRET_ARN`: ARN of the secret containing the Airtable API key
+
+The AWS configuration loader will automatically fetch these secrets from AWS Secrets Manager.
+
 ## Sync Strategy
 
 This tool uses an incremental sync approach with timestamp-based tracking to efficiently sync data between Jira and Airtable. Instead of performing full table scans on every sync, it:

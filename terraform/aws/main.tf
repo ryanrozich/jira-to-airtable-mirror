@@ -83,6 +83,7 @@ module "jira_mirror_lambda" {
     AIRTABLE_TABLE_NAME    = var.airtable_table_name
     JIRA_TO_AIRTABLE_FIELD_MAP = var.jira_to_airtable_field_map
     MAX_RESULTS            = var.max_results
+    BATCH_SIZE             = var.batch_size
     TZ                     = "UTC"
     JIRA_API_TOKEN_SECRET_ARN     = var.jira_api_token_secret_arn
     AIRTABLE_API_KEY_SECRET_ARN   = var.airtable_api_key_secret_arn

@@ -201,6 +201,48 @@ jira_to_airtable_field_map = {
 }
 ```
 
+## Configuration System
+
+The Lambda function uses an environment-aware configuration system that automatically handles AWS-specific requirements:
+
+### Environment Variables
+
+The Lambda function will automatically have `ENVIRONMENT=aws` set, which activates the AWS-specific configuration loader. This loader:
+
+1. Reads standard environment variables for non-sensitive configuration
+2. Automatically fetches sensitive data (API tokens) from AWS Secrets Manager
+3. Validates all configuration before starting the sync
+
+### Required Secrets
+
+Two secrets must be created in AWS Secrets Manager before deployment:
+
+1. Jira API Token:
+   - Create a secret for your Jira API token
+   - Note the ARN and set it in `terraform.tfvars` as `jira_api_token_secret_arn`
+   - The Lambda function will reference this via `JIRA_API_TOKEN_SECRET_ARN`
+
+2. Airtable API Key:
+   - Create a secret for your Airtable API key
+   - Note the ARN and set it in `terraform.tfvars` as `airtable_api_key_secret_arn`
+   - The Lambda function will reference this via `AIRTABLE_API_KEY_SECRET_ARN`
+
+### IAM Permissions
+
+The Lambda function's IAM role automatically includes the necessary permissions to:
+- Read from AWS Secrets Manager
+- Write logs to CloudWatch
+- Be invoked by EventBridge for scheduled runs
+
+### Configuration Flow
+
+1. Lambda starts with `ENVIRONMENT=aws`
+2. AWS configuration loader initializes
+3. Environment variables are read
+4. Secrets are fetched from AWS Secrets Manager
+5. Configuration is validated
+6. Sync process begins
+
 ## Deployment
 
 We use the `just` command runner for deployment. Available commands:

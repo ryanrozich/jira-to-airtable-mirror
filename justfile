@@ -167,6 +167,24 @@ run-scheduled: setup-venv
     . venv/bin/activate
     python sync.py --schedule
 
+# Validate Docker prerequisites
+validate-docker: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔍 Validating Docker prerequisites..."
+    . venv/bin/activate
+    export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+    python -c "from scripts.validation import docker; docker.main()"
+
+# Validate AWS prerequisites
+validate-aws: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔍 Validating AWS prerequisites..."
+    . venv/bin/activate
+    export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+    python -c "from scripts.validation import aws; aws.main()"
+
 # Run all validation scripts
 validate-all: setup-venv
     #!/usr/bin/env bash
@@ -175,28 +193,49 @@ validate-all: setup-venv
     
     . venv/bin/activate
     export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+    python scripts/run_validation.py
+
+# Validate Environment Configuration
+validate-config: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔍 Validating Environment Configuration..."
     
-    echo "1️⃣  Validating environment configuration..."
-    python scripts/validate_config.py
-    echo ""
+    . venv/bin/activate
+    export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+    python -c "from scripts.validation import config; config.main()"
+
+# Validate Connectivity and Schema
+validate-connectivity: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔍 Validating Connectivity and Schema..."
     
-    echo "2️⃣  Validating Airtable schema..."
-    python scripts/validate_schema.py
-    echo ""
+    . venv/bin/activate
+    export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+    python -c "from scripts.validation import connectivity; connectivity.main()"
+
+# Run CodeQL analysis locally (requires CodeQL CLI: https://github.com/github/codeql-cli-binaries)
+security-scan:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔒 Running CodeQL security scan..."
+    if ! command -v codeql &> /dev/null; then
+        echo "❌ CodeQL CLI not found. Please install it first:"
+        echo "https://github.com/github/codeql-cli-binaries"
+        exit 1
+    fi
     
-    echo "3️⃣  Testing Jira connection..."
-    python scripts/test_jira_connection.py
-    echo ""
+    # Create CodeQL database
+    codeql database create .codeql-db --language=python --source-root=.
     
-    echo "4️⃣  Testing Airtable connection..."
-    python scripts/test_airtable_connection.py
-    echo ""
+    # Run analysis
+    codeql database analyze .codeql-db \
+        --format=sarif-latest \
+        --output=codeql-results.sarif \
+        security-and-quality.qls
     
-    echo "5️⃣  Testing sync functionality..."
-    python scripts/test_sync.py
-    echo ""
-    
-    echo "✨ All validation tests passed successfully!"
+    echo "✅ Analysis complete. Results saved to codeql-results.sarif"
 
 # Clean up local development resources
 clean: docker-clean
@@ -278,25 +317,3 @@ lint: setup-venv
     flake8 app.py sync.py scripts/ --count --select=E9,F63,F7,F82 --show-source --statistics
     echo "Running style checks..."
     flake8 app.py sync.py scripts/ --count --max-complexity=10 --max-line-length=127 --statistics
-
-# Run CodeQL analysis locally (requires CodeQL CLI: https://github.com/github/codeql-cli-binaries)
-security-scan:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🔒 Running CodeQL security scan..."
-    if ! command -v codeql &> /dev/null; then
-        echo "❌ CodeQL CLI not found. Please install it first:"
-        echo "https://github.com/github/codeql-cli-binaries"
-        exit 1
-    fi
-    
-    # Create CodeQL database
-    codeql database create .codeql-db --language=python --source-root=.
-    
-    # Run analysis
-    codeql database analyze .codeql-db \
-        --format=sarif-latest \
-        --output=codeql-results.sarif \
-        security-and-quality.qls
-    
-    echo "✅ Analysis complete. Results saved to codeql-results.sarif"
