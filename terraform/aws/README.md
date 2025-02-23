@@ -1,0 +1,276 @@
+# AWS Lambda Deployment
+
+This directory contains the Terraform configuration for deploying the Jira to Airtable Mirror application to AWS Lambda.
+
+## Prerequisites
+
+1. AWS CLI installed and configured with appropriate credentials
+2. Required AWS permissions (see below)
+3. Docker installed and running (for building Lambda container images)
+4. Just command runner installed
+
+## Deployment Readiness Check
+
+Use this decision tree to quickly determine what you need before deploying:
+
+```mermaid
+graph LR
+    A([Start]) --> B{AWS CLI?}
+    B -->|No| C[Install CLI]
+    B -->|Yes| D{IAM Ready?}
+    D -->|No| E[Add Permissions]
+    D -->|Yes| F{Docker?}
+    F -->|No| G[Start Docker]
+    F -->|Yes| J{Just?}
+    J -->|No| K[Install Just]
+    J -->|Yes| H([Ready!<br>Skip to Configuration])
+    
+    click C href "#prerequisites" "View Prerequisites"
+    click E href "#required-aws-permissions" "View Required Permissions"
+    click G href "#prerequisites" "View Prerequisites"
+    click K href "#prerequisites" "View Prerequisites"
+    click H href "#configuration" "Skip to Configuration Section"
+    
+    style A fill:#f5f5ff,stroke:#333,stroke-width:2px
+    style H fill:#e6ffe6,stroke:#333,stroke-width:2px,font-weight:bold
+    style C fill:#fff5e6,stroke:#333,stroke-width:2px
+    style E fill:#fff5e6,stroke:#333,stroke-width:2px
+    style G fill:#fff5e6,stroke:#333,stroke-width:2px
+    style K fill:#fff5e6,stroke:#333,stroke-width:2px
+```
+
+## Required AWS Permissions
+
+The AWS user executing the deployment needs the following permissions:
+
+### ECR Permissions
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "ecr:CreateRepository",
+                "ecr:DeleteRepository",
+                "ecr:DescribeRepositories",
+                "ecr:GetAuthorizationToken",
+                "ecr:PutImage",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:PutLifecyclePolicy"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+### Lambda Permissions
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "lambda:CreateFunction",
+                "lambda:DeleteFunction",
+                "lambda:GetFunction",
+                "lambda:UpdateFunctionCode",
+                "lambda:UpdateFunctionConfiguration",
+                "lambda:InvokeFunction",
+                "lambda:AddPermission",
+                "lambda:RemovePermission"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+### CloudWatch Permissions
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:DeleteLogGroup",
+                "logs:DescribeLogGroups",
+                "logs:CreateLogStream",
+                "logs:DeleteLogStream",
+                "logs:PutLogEvents",
+                "events:PutRule",
+                "events:DeleteRule",
+                "events:PutTargets",
+                "events:RemoveTargets",
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:DeleteAlarms",
+                "cloudwatch:DescribeAlarms",
+                "cloudwatch:GetMetricStatistics",
+                "cloudwatch:ListMetrics"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+### SNS Permissions
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sns:CreateTopic",
+                "sns:DeleteTopic",
+                "sns:SetTopicAttributes",
+                "sns:Subscribe",
+                "sns:Publish",
+                "sns:ListTopics",
+                "sns:GetTopicAttributes"
+            ],
+            "Resource": "*"
+        }
+    ]
+}
+```
+
+## Configuration
+
+### 1. AWS Secrets
+
+Create secrets for your API tokens:
+
+```bash
+# Create Jira API token secret
+aws secretsmanager create-secret \
+  --name jira-api-token \
+  --description "Jira API token for sync service" \
+  --secret-string "your-jira-token"
+
+# Create Airtable API key secret
+aws secretsmanager create-secret \
+  --name airtable-api-key \
+  --description "Airtable API key for sync service" \
+  --secret-string "your-airtable-key"
+```
+
+### 2. Terraform Variables
+
+Create a `terraform.tfvars` file:
+
+```hcl
+# AWS Configuration
+aws_region = "us-west-2"  # Your preferred AWS region
+
+# Jira Configuration
+jira_server = "https://your-domain.atlassian.net"
+jira_username = "your-email@example.com"
+jira_project_key = "PROJECT"
+jira_jql_filter = "project = PROJECT"
+
+# Airtable Configuration
+airtable_base_id = "your_base_id"
+airtable_table_name = "your_table"
+
+# AWS Secrets Manager ARNs (from step 1)
+jira_api_token_secret_arn = "arn:aws:secretsmanager:region:account:secret:jira-api-token-xxx"
+airtable_api_key_secret_arn = "arn:aws:secretsmanager:region:account:secret:airtable-api-key-xxx"
+
+# Sync Configuration
+sync_interval_minutes = "10"
+max_results = "1000"
+batch_size = "50"
+
+# Field Mappings (customize based on your Airtable fields)
+jira_to_airtable_field_map = {
+  key = {
+    airtable_field_id = "fldXXX"
+  }
+  summary = {
+    airtable_field_id = "fldYYY"
+  }
+  # Add more field mappings as needed
+}
+```
+
+## Deployment
+
+We use the `just` command runner for deployment. Available commands:
+
+```bash
+# Deploy the Lambda function
+just lambda-deploy
+
+# Destroy all resources
+just lambda-destroy
+
+# View logs
+just lambda-logs
+
+# Invoke the function manually
+just lambda-invoke
+```
+
+## Monitoring
+
+### CloudWatch Alarms
+
+The deployment includes CloudWatch alarms for:
+- Memory utilization (80%, 90%, 95% thresholds)
+- Error rate monitoring
+
+These alarms will notify through an SNS topic. To receive notifications:
+
+1. Get the SNS topic ARN from Terraform outputs:
+```bash
+terraform output sns_topic_arn
+```
+
+2. Subscribe to the topic:
+```bash
+aws sns subscribe \
+  --topic-arn <sns_topic_arn> \
+  --protocol email \
+  --notification-endpoint your-email@example.com
+```
+
+### CloudWatch Logs
+
+View logs in CloudWatch:
+1. Go to CloudWatch > Log groups
+2. Find the group `/aws/lambda/jira-to-airtable-mirror`
+
+### CloudWatch Metrics
+
+Monitor Lambda metrics:
+1. Go to CloudWatch > Metrics > Lambda
+2. Key metrics:
+   - Invocations
+   - Duration
+   - Memory utilization
+   - Error count
+
+## Cleanup
+
+To destroy all resources:
+
+```bash
+just lambda-destroy
+```
+
+This will remove:
+- Lambda function
+- ECR repository and images
+- CloudWatch log group
+- CloudWatch alarms
+- SNS topic
+- IAM roles and policies
+- EventBridge rules
