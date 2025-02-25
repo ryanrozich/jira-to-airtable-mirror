@@ -248,8 +248,75 @@ clean: docker-clean
     rm -rf .coverage
     echo "✅ Local cleanup complete"
 
+# Internal function to get logs with time filtering
+_lambda-logs-filtered region time ascending="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    
+    # Convert time to date adjustment format
+    case "{{time}}" in
+        *h)
+            TIME_ADJ="-$(echo {{time}} | sed 's/h//g')H"
+            ;;
+        *m)
+            TIME_ADJ="-$(echo {{time}} | sed 's/m//g')M"
+            ;;
+        *)
+            echo "❌ Invalid time format. Use: 30m, 1h, 2h, etc."
+            exit 1
+            ;;
+    esac
+    
+    # Convert time to milliseconds for the query
+    START_TIME=$(date -v"$TIME_ADJ" +%s)000
+    
+    # Run CloudWatch Logs Insights query
+    QUERY="fields @timestamp, @message"
+    if [ "{{ascending}}" = "true" ]; then
+        QUERY="${QUERY} | sort @timestamp asc"
+    else
+        QUERY="${QUERY} | sort @timestamp desc"
+    fi
+    
+    echo "🔍 Query: $QUERY"  # Debug output
+    
+    # Start the query and get query ID
+    QUERY_ID=$(aws {{aws_cli_opts}} logs start-query \
+        --log-group-name /aws/lambda/{{app_name}} \
+        --start-time $START_TIME \
+        --end-time $(date +%s)000 \
+        --region {{region}} \
+        --query-string "$QUERY" \
+        --output text \
+        --query 'queryId')
+    
+    # Poll for results
+    while true; do
+        RESULTS=$(aws {{aws_cli_opts}} logs get-query-results --query-id "$QUERY_ID" --region {{region}})
+        STATUS=$(echo "$RESULTS" | jq -r .status)
+        if [ "$STATUS" = "Complete" ]; then
+            echo "$RESULTS" | \
+                jq -r ".results[] | [.[0].value, .[1].value] | @tsv" | \
+                while IFS=$"\t" read -r timestamp message; do
+                    printf "%s %s\n" "$timestamp" "$message"
+                done
+            break
+        elif [ "$STATUS" = "Failed" ]; then
+            echo "❌ Query failed"
+            break
+        fi
+        sleep 1
+    done
+
+# Get recent AWS Lambda logs
+lambda-logs-recent time="15m" region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📝 Getting logs for the last {{time}}..."
+    just _lambda-logs-filtered {{region}} {{time}} true
+
 # Tail AWS Lambda logs in real-time
-lambda-logs region=default_region:
+lambda-logs-tail region=default_region:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "📝 Tailing logs for {{app_name}}..."
@@ -257,18 +324,8 @@ lambda-logs region=default_region:
         /aws/lambda/{{app_name}} \
         --region {{region}} \
         --follow \
+        --since 1m \
         --format short
-
-# Get recent AWS Lambda logs
-lambda-logs-recent region=default_region minutes="30":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "📝 Getting last {{minutes}} minutes of logs for {{app_name}}..."
-    aws {{aws_cli_opts}} logs tail \
-        /aws/lambda/{{app_name}} \
-        --region {{region}} \
-        --format short \
-        --since {{minutes}}m
 
 # Invoke AWS Lambda function manually
 lambda-invoke region=default_region:
@@ -281,6 +338,36 @@ lambda-invoke region=default_region:
         --invocation-type RequestResponse \
         --payload '{}' \
         /dev/stdout
+
+# Get current Lambda log level
+lambda-get-log-level region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📝 Getting current log level..."
+    aws {{aws_cli_opts}} lambda get-function-configuration \
+        --function-name {{app_name}} \
+        --region {{region}} \
+        --query 'Environment.Variables.LOG_LEVEL' \
+        --output text
+
+# Invoke Lambda function synchronously
+lambda-invoke-sync region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🚀 Invoking Lambda function synchronously..."
+    RESPONSE_FILE=$(mktemp)
+    aws {{aws_cli_opts}} lambda invoke \
+        --function-name {{app_name}} \
+        --region {{region}} \
+        --invocation-type RequestResponse \
+        --log-type Tail \
+        --payload '{}' \
+        "$RESPONSE_FILE" \
+        --query 'LogResult' \
+        --output text | base64 -d
+    echo "Response payload:"
+    cat "$RESPONSE_FILE"
+    rm "$RESPONSE_FILE"
 
 # View Lambda container image details
 lambda-image:
@@ -317,3 +404,87 @@ lint: setup-venv
     flake8 app.py sync.py scripts/ --count --select=E9,F63,F7,F82 --show-source --statistics
     echo "Running style checks..."
     flake8 app.py sync.py scripts/ --count --max-complexity=10 --max-line-length=127 --statistics
+
+# View CloudWatch metrics for Lambda function
+lambda-metrics period="1h": setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📊 Getting CloudWatch metrics for {{app_name}}..."
+    
+    . venv/bin/activate
+    
+    # Convert period to hours
+    HOURS=$(echo "{{period}}" | sed 's/h$//')
+    
+    ./scripts/get_metrics.py \
+        --function-name {{app_name}} \
+        --region {{default_region}} \
+        --hours ${HOURS}
+
+# Update Lambda log level without redeploying
+lambda-set-log-level level region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📝 Setting log level to {{level}}..."
+    ENV_VARS=$(aws {{aws_cli_opts}} lambda get-function-configuration \
+        --function-name {{app_name}} \
+        --region {{region}} \
+        --query 'Environment.Variables' \
+        --output json)
+    UPDATED_ENV=$(echo "$ENV_VARS" | jq '. + {"LOG_LEVEL": "{{level}}"}')
+    aws {{aws_cli_opts}} lambda update-function-configuration \
+        --function-name {{app_name}} \
+        --region {{region}} \
+        --cli-input-json "{\"FunctionName\": \"{{app_name}}\", \"Environment\": {\"Variables\": $UPDATED_ENV}}"
+
+# Display Jira field schema
+schema-jira: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📝 Displaying Jira field schema..."
+    . venv/bin/activate
+    python scripts/schema/jira_schema.py
+
+# Display Airtable schema
+schema-airtable: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📝 Displaying Airtable schema..."
+    . venv/bin/activate
+    python scripts/schema/airtable_schema.py
+
+# Pause the Lambda scheduler
+lambda-scheduler-pause region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "⏸️  Pausing Lambda scheduler..."
+    aws {{aws_cli_opts}} events disable-rule \
+        --name "{{app_name}}-schedule" \
+        --region {{region}}
+    echo "✅ Scheduler paused"
+
+# Resume the Lambda scheduler
+lambda-scheduler-resume region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "▶️  Resuming Lambda scheduler..."
+    aws {{aws_cli_opts}} events enable-rule \
+        --name "{{app_name}}-schedule" \
+        --region {{region}}
+    echo "✅ Scheduler resumed"
+
+# Check Lambda scheduler status
+lambda-scheduler-status region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📊 Checking Lambda scheduler status..."
+    STATE=$(aws {{aws_cli_opts}} events describe-rule \
+        --name "{{app_name}}-schedule" \
+        --region {{region}} \
+        --query 'State' \
+        --output text)
+    if [ "$STATE" = "ENABLED" ]; then
+        echo "🟢 Scheduler is ACTIVE"
+    else
+        echo "⭕ Scheduler is PAUSED"
+    fi

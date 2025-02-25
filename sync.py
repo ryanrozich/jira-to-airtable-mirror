@@ -21,47 +21,67 @@ class JiraAirtableSync:
 
     def __init__(self, config: SyncConfig) -> None:
         """Initialize the sync class with configuration."""
-        self.jira = JIRA(
-            server=config.jira_server,
-            basic_auth=(config.jira_username, config.jira_api_token)
-        )
+        self.config = config
+        self.field_mappings = self._init_field_mappings()
+        
+        try:
+            logger.info(f"Attempting to connect to JIRA server at {config.jira_server}")
+            self.jira = JIRA(
+                server=config.jira_server,
+                basic_auth=(config.jira_username, config.jira_api_token)
+            )
+            logger.info(f"Successfully authenticated to JIRA as {config.jira_username}")
+        except Exception as e:
+            logger.error(f"Failed to connect to JIRA: {str(e)}")
+            raise
+            
+        # Initialize Airtable client
         self.api = Api(config.airtable_api_key)
         self.table = self.api.table(config.airtable_base_id, config.airtable_table_name)
         self.project_key = config.jira_project_key
         self.batch_size = config.batch_size
-        self.field_mappings = config.field_mappings
         
         # Get Jira timezone
         self.timezone = self._get_jira_timezone()
+        logger.info(f"Using Jira Cloud user timezone: {self.timezone}")
+        
+        # Initialize sync state
+        self.jira_issue_buffer = []
+        self.current_batch = []
+        
+        # Fetch and populate Airtable field names
+        self._populate_field_names()
+        
+        # Log initialization details
         logger.info(f"Initializing sync from Jira project {self.project_key} to Airtable table {config.airtable_table_name}")
         logger.info(f"Jira Server: {config.jira_server}")
         logger.info(f"Airtable Base: {config.airtable_base_id}")
         logger.info(f"Using batch size of {self.batch_size} for Airtable operations")
         logger.info(f"Using Jira instance timezone: {self.timezone}")
         
-        # Fetch and populate Airtable field names
-        self._populate_field_names()
+        # Add debug logging for environment variables
+        logger.debug(f"Environment variables: {dict(os.environ)}")
+
+    def _init_field_mappings(self) -> Dict[str, Dict[str, str]]:
+        """Initialize field mappings from configuration."""
+        logger.debug("Initializing field mappings")
+        return self.config.field_mappings
 
     def _get_jira_timezone(self) -> str:
         """Get the timezone setting from Jira instance."""
         try:
-            # For Jira Cloud, we can get the timezone from the current user using API v3
-            myself = self.jira._session.get(f"{self.jira._options['server']}/rest/api/3/myself").json()
+            # For Jira Cloud, get the timezone from the current user
+            myself = self.jira.myself()
             user_tz = myself.get('timeZone')
             if user_tz:
-                try:
-                    import pytz
-                    pytz.timezone(user_tz)  # Validate the timezone
-                    logger.info(f"Using Jira Cloud user timezone: {user_tz}")
-                    return user_tz
-                except pytz.exceptions.UnknownTimeZoneError:
-                    logger.warning(f"Invalid timezone {user_tz} from Jira Cloud user, falling back to UTC")
+                return user_tz
             
-            logger.warning("Could not determine Jira timezone from user settings, falling back to UTC")
-            return 'UTC'
+            # Fall back to UTC if no timezone is found
+            logger.warning("No timezone found in Jira user profile, falling back to UTC")
+            return "UTC"
         except Exception as e:
             logger.warning(f"Error getting Jira timezone, falling back to UTC: {str(e)}")
-            return 'UTC'
+            return "UTC"
 
     def _populate_field_names(self) -> None:
         """
@@ -69,46 +89,40 @@ class JiraAirtableSync:
         This ensures we have the current field names even if they change in Airtable.
         """
         try:
-            logger.info("Starting to map Airtable field IDs to field names...")
-            # Get table metadata which includes field information
-            table_schema = self.table.schema()
-            logger.debug(f"Retrieved schema for table with {len(table_schema.fields)} fields")
-            
-            # Create mapping of field IDs to names
-            field_map = {}
-            for field in table_schema.fields:
-                field_map[field.id] = field.name
-                logger.debug(f"Found field: {field.name} (Type: {field.type})")
-            
-            # Update field mappings with current field names
-            field_mapping_results = []
+            # Get field metadata from Airtable
+            schema = self.table.schema()
+            field_map = {field.id: field.name for field in schema.fields}
+            logger.debug(f"Retrieved {len(field_map)} field names from Airtable")
+
+            # Update field mappings with names
             for jira_field, airtable_info in self.field_mappings.items():
                 field_id = airtable_info.get('airtable_field_id')
-                if field_id in field_map:
-                    airtable_info['airtable_field_name'] = field_map[field_id]
-                    field_mapping_results.append(f"'{jira_field}' -> {field_id} ({field_map[field_id]})")
-                    logger.debug(f"Mapped Airtable field ID {field_id} to name: {field_map[field_id]}")
-                else:
-                    logger.warning(f"Could not find Airtable field name for ID: {field_id}")
+                # Only fetch and populate field name if it's not already provided
+                if field_id and not airtable_info.get('airtable_field_name'):
                     airtable_info['airtable_field_name'] = None
-            
-            logger.info("Field mapping complete. Final mappings:")
-            for mapping in sorted(field_mapping_results):
-                logger.info(f"  {mapping}")
+                    # Only populate if this is the 'updated' field which needs the name for sorting
+                    if jira_field == 'updated':
+                        airtable_info['airtable_field_name'] = field_map.get(field_id)
+                        if not airtable_info['airtable_field_name']:
+                            logger.warning(f"Could not find field name for Jira field '{jira_field}' (ID: {field_id})")
+
         except Exception as e:
             logger.error(f"Error fetching Airtable field names: {str(e)}", exc_info=True)
-            raise
-
+        
     def _get_airtable_field_name(self, jira_field: str) -> Optional[str]:
         """Get the Airtable field name for a given Jira field."""
         if jira_field in self.field_mappings:
-            return self.field_mappings[jira_field]['airtable_field_name']
+            return self.field_mappings[jira_field].get('airtable_field_name')
         return None
 
     def _get_airtable_field_id(self, jira_field: str) -> Optional[str]:
         """Get the Airtable field ID for a given Jira field."""
+        logger.debug(f"Getting Airtable field ID for Jira field '{jira_field}'")
+        logger.debug(f"Field mappings: {self.field_mappings}")
         if jira_field in self.field_mappings:
-            return self.field_mappings[jira_field]['airtable_field_id']
+            field_id = self.field_mappings[jira_field].get('airtable_field_id')
+            logger.debug(f"Found field ID: {field_id}")
+            return field_id
         return None
 
     def retry_with_backoff(retries: int = 3, backoff_in_seconds: int = 1) -> Callable:
@@ -180,7 +194,7 @@ class JiraAirtableSync:
         return f"{num_bytes:.1f} TB"
 
     @retry_with_backoff(retries=3, backoff_in_seconds=1)
-    def _get_last_sync_time(self) -> Optional[str]:
+    def _get_most_recent_jira_update_time(self) -> Optional[str]:
         """
         Get the most recent Jira update timestamp from Airtable records.
         This timestamp represents the last time any Jira issue was updated
@@ -225,7 +239,7 @@ class JiraAirtableSync:
         Uses pagination to ensure all matching issues are retrieved.
         Orders issues by key to ensure consistent processing order.
         """
-        last_sync = self._get_last_sync_time()
+        last_sync = self._get_most_recent_jira_update_time()
         jql_filter = os.getenv('JIRA_JQL_FILTER', '')
         
         # Build JQL query
@@ -259,7 +273,8 @@ class JiraAirtableSync:
                 jql,
                 startAt=start_at,
                 maxResults=max_results,
-                expand=['changelog']  # Include changelog for additional fields
+                expand=['changelog'],  # Include changelog for additional fields
+                fields='*all,comment'  # Include all fields and comments
             )
             batch_size = sum(len(str(issue.raw)) for issue in batch)
             total_bytes += batch_size
@@ -409,14 +424,17 @@ class JiraAirtableSync:
                     return None
                     
                 status_changes = [
-                    item for history in issue.changelog.histories
+                    (history.created, item)
+                    for history in issue.changelog.histories
                     for item in history.items if item.field == 'status'
                 ]
                 logger.debug(f"[{issue.key}] Found {len(status_changes)} status changes")
                 if status_changes:
-                    latest_status = status_changes[-1]
-                    logger.debug(f"[{issue.key}] Latest status change: {latest_status.to}")
-                    return latest_status.to
+                    # Sort by created date to get the most recent
+                    status_changes.sort(key=lambda x: x[0])
+                    latest_update_time = status_changes[-1][0]
+                    logger.debug(f"[{issue.key}] Latest status change time: {latest_update_time}")
+                    return latest_update_time
                 return None
 
             # Try to get the field from issue.fields
@@ -561,7 +579,7 @@ class JiraAirtableSync:
         
         for chunk in key_chunks:
             # Build OR formula to find any records matching the keys in this chunk
-            formula_parts = [f"{key_field_id}='{key}'" for key in chunk]
+            formula_parts = [f"{{'{key_field_id}'}} = '{key}'" for key in chunk]
             formula = f"OR({','.join(formula_parts)})"
             logger.debug(f"Querying Airtable for {len(chunk)} keys with formula: {formula}")
             
@@ -589,13 +607,16 @@ class JiraAirtableSync:
         if not jira_keys:
             return {}
             
-        key_field = self._get_airtable_field_name('key')
-        if not key_field:
+        key_field_id = self._get_airtable_field_id('key')
+        key_field_name = self._get_airtable_field_name('key')
+        logger.debug(f"Field mappings in _get_existing_record_ids: {self.field_mappings}")
+        logger.debug(f"Key field ID: {key_field_id}, field name: {key_field_name}")
+        if not key_field_id or not key_field_name:
             logger.error("No 'key' field mapping found in field_mappings")
             return {}
             
-        logger.debug(f"Looking up existing records for {len(jira_keys)} Jira keys")
-        logger.debug(f"Using Airtable field '{key_field}' for Jira key lookup")
+        logger.debug(f"Looking up existing records for {len(jira_keys)} Jira keys: {jira_keys}")
+        logger.debug(f"Using Airtable field '{key_field_name}' for Jira key lookup")
         
         # Get records in chunks to avoid formula length limits
         chunk_size = 100  # Adjust if needed based on key lengths
@@ -604,7 +625,7 @@ class JiraAirtableSync:
         for i in range(0, len(jira_keys), chunk_size):
             chunk = jira_keys[i:i + chunk_size]
             # Build OR condition for each key - wrap field names with spaces in curly braces
-            conditions = [f"{{{key_field}}} = '{key}'" for key in chunk]
+            conditions = [f"{{{key_field_name}}} = '{key}'" for key in chunk]
             formula = f"OR({','.join(conditions)})"
             
             try:
@@ -614,7 +635,8 @@ class JiraAirtableSync:
                 
                 # Map each record's key to its ID
                 for record in records:
-                    jira_key = record['fields'].get(key_field)
+                    logger.debug(f"Processing record: {record}")
+                    jira_key = record['fields'].get(key_field_name)
                     if jira_key:
                         if jira_key in key_to_record_id:
                             logger.warning(f"Found duplicate record for Jira key {jira_key}. "

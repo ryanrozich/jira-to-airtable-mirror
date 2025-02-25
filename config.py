@@ -53,18 +53,36 @@ class SyncConfig:
         """Validate the configuration."""
         # Check required fields are not empty
         for field, value in self.to_dict().items():
-            if field != 'batch_size' and not value:
+            if field == 'batch_size':
+                continue
+                
+            if isinstance(value, str):
+                # For string fields, check they're not empty after stripping whitespace
+                if not value.strip():
+                    logger.error(f"Configuration validation failed: {field} is empty or whitespace")
+                    raise ValueError(f"Empty value for required configuration: {field}")
+                logger.debug(f"Validated {field} (length: {len(value)})")
+            elif value is None:
+                logger.error(f"Configuration validation failed: {field} is None")
+                raise ValueError(f"Empty value for required configuration: {field}")
+            elif not value and not isinstance(value, bool):  # Allow False as a valid value
+                logger.error(f"Configuration validation failed: {field} is empty")
                 raise ValueError(f"Empty value for required configuration: {field}")
 
         # Validate field mappings format
         if not isinstance(self.field_mappings, dict):
+            logger.error("Configuration validation failed: field_mappings is not a dictionary")
             raise ValueError("field_mappings must be a dictionary")
 
         for jira_field, airtable_info in self.field_mappings.items():
             if not isinstance(airtable_info, dict):
+                logger.error(f"Configuration validation failed: field mapping for {jira_field} is not a dictionary")
                 raise ValueError(f"Field mapping for {jira_field} must be a dictionary with 'airtable_field_id'")
             if 'airtable_field_id' not in airtable_info:
+                logger.error(f"Configuration validation failed: field mapping for {jira_field} missing airtable_field_id")
                 raise ValueError(f"Field mapping for {jira_field} missing 'airtable_field_id'")
+            
+        logger.debug("Configuration validation successful")
 
 
 class ConfigLoader(abc.ABC):
@@ -139,12 +157,34 @@ class AWSConfigLoader(ConfigLoader):
             if not self.region:
                 self.region = secret_arn.split(':')[3]  # Extract region from ARN
             
+            logger.info(f"Fetching secret from ARN: {secret_arn}")
             response = self.secrets_client.get_secret_value(SecretId=secret_arn)
+            
             if 'SecretString' in response:
-                return response['SecretString']
+                secret_value = response['SecretString']
+                if not secret_value:
+                    logger.error(f"Secret {secret_arn} exists but contains an empty string")
+                    raise ValueError(f"Secret {secret_arn} contains an empty string")
+                
+                # Ensure proper string encoding and remove any whitespace
+                secret_value = secret_value.encode('utf-8').decode('utf-8').strip()
+                logger.info(f"Successfully retrieved secret from {secret_arn} (length: {len(secret_value)})")
+                
+                # Log the first few characters to help with debugging
+                if len(secret_value) > 0:
+                    logger.debug(f"First few characters of secret: {secret_value[:4]}...")
+                
+                return secret_value
+            
+            logger.error(f"Secret {secret_arn} does not contain a SecretString")
             raise ValueError(f"Secret {secret_arn} does not contain a string value")
         except ClientError as e:
-            logger.error(f"Error fetching secret {secret_arn}: {str(e)}")
+            error_code = e.response['Error']['Code']
+            error_message = e.response['Error']['Message']
+            logger.error(f"AWS Error fetching secret {secret_arn}: {error_code} - {error_message}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error fetching secret {secret_arn}: {str(e)}")
             raise
 
     def load(self) -> SyncConfig:
@@ -156,10 +196,17 @@ class AWSConfigLoader(ConfigLoader):
         if not jira_token_arn or not airtable_key_arn:
             raise ValueError("Missing required secret ARNs")
 
-        # Fetch secrets
-        jira_token = self.get_secret(jira_token_arn)
-        airtable_key = self.get_secret(airtable_key_arn)
+        # Fetch secrets first
+        logger.info("Fetching secrets from AWS Secrets Manager...")
+        try:
+            jira_token = self.get_secret(jira_token_arn)
+            airtable_key = self.get_secret(airtable_key_arn)
+            logger.info("Successfully retrieved secrets")
+        except Exception as e:
+            logger.error("Failed to retrieve secrets", exc_info=True)
+            raise
 
+        # Create config object
         config = SyncConfig(
             jira_server=os.getenv('JIRA_SERVER', ''),
             jira_username=os.getenv('JIRA_USERNAME', ''),
@@ -172,7 +219,11 @@ class AWSConfigLoader(ConfigLoader):
             batch_size=int(os.getenv('BATCH_SIZE', '50')),
         )
         
+        # Validate after all values are set
+        logger.info("Validating configuration...")
         config.validate()
+        logger.info("Configuration validation successful")
+        
         return config
 
 
@@ -198,6 +249,7 @@ def get_config_loader(environment: str = 'local', **kwargs) -> ConfigLoader:
     Raises:
         ValueError: If environment is not supported
     """
+    logger.info(f"Getting config loader for environment: {environment}")
     loaders = {
         'local': LocalConfigLoader,
         'aws': AWSConfigLoader,
@@ -208,4 +260,5 @@ def get_config_loader(environment: str = 'local', **kwargs) -> ConfigLoader:
     if not loader_class:
         raise ValueError(f"Unsupported environment: {environment}")
     
+    logger.info(f"Using config loader class: {loader_class.__name__}")
     return loader_class(**kwargs)
