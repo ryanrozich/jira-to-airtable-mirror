@@ -1,50 +1,53 @@
-import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from functools import wraps
-from typing import Any, Dict, List, Optional, Callable, Tuple, TypeVar, Union
+from logging import getLogger
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-from dotenv import load_dotenv
 from jira import JIRA
-from pyairtable import Api
+from pyairtable import Api, Table
 from pyairtable.formulas import match
 
 from config import SyncConfig, get_config_loader
 
+
 # Configure logging
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
+
 
 class JiraAirtableSync:
     """Handles synchronization between Jira and Airtable."""
 
-    def __init__(self, config: SyncConfig) -> None:
-        """Initialize the sync class with configuration."""
+    def __init__(self, config: SyncConfig):
+        """
+        Initialize the sync handler with configuration.
+
+        Args:
+            config: Configuration object containing Jira and Airtable settings
+        """
         self.config = config
+        self.jira = JIRA(
+            server=config.jira_server,
+            basic_auth=(config.jira_username, config.jira_api_token)
+        )
+        self.airtable = Api(config.airtable_api_key)
+        self.table = Table(
+            api_key=config.airtable_api_key,
+            base_id=config.airtable_base_id,
+            table_name=config.airtable_table_name
+        )
         self.field_mappings = self._init_field_mappings()
+        self.reverse_field_mappings = {v['airtable_field_id']: k for k, v in self.field_mappings.items()}
         
         try:
             logger.info(f"Attempting to connect to JIRA server at {config.jira_server}")
-            self.jira = JIRA(
-                server=config.jira_server,
-                basic_auth=(config.jira_username, config.jira_api_token)
-            )
             logger.info(f"Successfully authenticated to JIRA as {config.jira_username}")
         except Exception as e:
             logger.error(f"Failed to connect to JIRA: {str(e)}")
             raise
             
-        # Initialize Airtable client
-        self.api = Api(config.airtable_api_key)
-        self.table = self.api.table(config.airtable_base_id, config.airtable_table_name)
-        self.project_key = config.jira_project_key
-        self.batch_size = config.batch_size
-        
-        # Get Jira timezone
-        self.timezone = self._get_jira_timezone()
-        logger.info(f"Using Jira Cloud user timezone: {self.timezone}")
-        
         # Initialize sync state
         self.jira_issue_buffer = []
         self.current_batch = []
@@ -53,11 +56,10 @@ class JiraAirtableSync:
         self._populate_field_names()
         
         # Log initialization details
-        logger.info(f"Initializing sync from Jira project {self.project_key} to Airtable table {config.airtable_table_name}")
+        logger.info(f"Initializing sync from Jira project {self.config.jira_project_key} to Airtable table {config.airtable_table_name}")
         logger.info(f"Jira Server: {config.jira_server}")
         logger.info(f"Airtable Base: {config.airtable_base_id}")
-        logger.info(f"Using batch size of {self.batch_size} for Airtable operations")
-        logger.info(f"Using Jira instance timezone: {self.timezone}")
+        logger.info(f"Using batch size of {config.batch_size} for Airtable operations")
         
         # Add debug logging for environment variables
         logger.debug(f"Environment variables: {dict(os.environ)}")
@@ -166,12 +168,12 @@ class JiraAirtableSync:
             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
             
             # Convert to configured timezone
-            target_tz = pytz.timezone(self.timezone)
+            target_tz = pytz.timezone(self._get_jira_timezone())
             local_dt = dt.astimezone(target_tz)
             
             # Format to Jira's supported minute precision
             formatted = local_dt.strftime('%Y-%m-%d %H:%M')
-            logger.debug(f"Converting timestamp from UTC ({timestamp}) to Jira instance timezone {self.timezone} ({formatted})")
+            logger.debug(f"Converting timestamp from UTC ({timestamp}) to Jira instance timezone {self._get_jira_timezone()} ({formatted})")
             return formatted
         except Exception as e:
             logger.error(f"Error formatting timestamp {timestamp}: {str(e)}")
@@ -243,7 +245,7 @@ class JiraAirtableSync:
         jql_filter = os.getenv('JIRA_JQL_FILTER', '')
         
         # Build JQL query
-        jql_parts = [f"project = {self.project_key}"]
+        jql_parts = [f"project = {self.config.jira_project_key}"]
         if last_sync:
             formatted_time = self._format_jira_timestamp(last_sync)
             jql_parts.append(f"updated > '{formatted_time}'")
@@ -359,13 +361,14 @@ class JiraAirtableSync:
             
             return 0, failed_keys
 
-    def _get_issue_field_value(self, issue: Any, field_name: str) -> Any:  # noqa: C901
+    def _get_issue_field_value(self, issue: Any, field_name: str) -> Any:
         """
         Extract field value from Jira issue.
 
         This method handles various field types and edge cases, including:
         - Direct field access
-        - Special handling for 'key', 'parent', 'latest_comment', 'comment_author', 'comment_updated', and 'status_updated' fields
+        - Special handling for 'key', 'parent', 'latest_comment', 'comment_author',
+          'comment_updated', and 'status_updated' fields
         - Handling for fields with 'value', 'name', or 'displayName' attributes
         - Handling for list fields
 
@@ -378,7 +381,7 @@ class JiraAirtableSync:
         """
         try:
             logger.debug(f"[{issue.key}] Getting Jira field '{field_name}'")
-            
+
             # Special case for 'key' field which is accessed directly from issue
             if field_name == 'key':
                 return issue.key
@@ -395,47 +398,11 @@ class JiraAirtableSync:
 
             # Special handling for comment-related fields
             if field_name in ['latest_comment', 'comment_author', 'comment_updated']:
-                logger.debug(f"[{issue.key}] Processing comment field '{field_name}'")
-                # Comments should be pre-fetched in the issue object
-                if not hasattr(issue, 'fields') or not hasattr(issue.fields, 'comment'):
-                    logger.debug(f"[{issue.key}] No comments field found")
-                    return None
-                    
-                comments = issue.fields.comment.comments
-                if not comments:
-                    return None
-                    
-                latest_comment = comments[-1]  # Get the most recent comment
-                logger.debug(f"[{issue.key}] Latest comment: {latest_comment}")
-                
-                if field_name == 'latest_comment':
-                    return latest_comment.body
-                elif field_name == 'comment_author':
-                    return latest_comment.author.displayName if hasattr(latest_comment.author, 'displayName') else str(latest_comment.author)
-                elif field_name == 'comment_updated':
-                    return latest_comment.updated
+                return self._get_comment_field_value(issue, field_name)
 
             # Special handling for status_updated field
             if field_name == 'status_updated':
-                logger.debug(f"[{issue.key}] Processing status_updated field")
-                # Changelog should be pre-fetched in the issue object
-                if not hasattr(issue, 'changelog'):
-                    logger.debug(f"[{issue.key}] No changelog found")
-                    return None
-                    
-                status_changes = [
-                    (history.created, item)
-                    for history in issue.changelog.histories
-                    for item in history.items if item.field == 'status'
-                ]
-                logger.debug(f"[{issue.key}] Found {len(status_changes)} status changes")
-                if status_changes:
-                    # Sort by created date to get the most recent
-                    status_changes.sort(key=lambda x: x[0])
-                    latest_update_time = status_changes[-1][0]
-                    logger.debug(f"[{issue.key}] Latest status change time: {latest_update_time}")
-                    return latest_update_time
-                return None
+                return self._get_status_updated_value(issue)
 
             # Try to get the field from issue.fields
             if not hasattr(issue, 'fields'):
@@ -454,33 +421,81 @@ class JiraAirtableSync:
                 return None
 
             logger.debug(f"[{issue.key}] Retrieved field value: {field}")
+            return self._process_field_value(field)
 
-            # Handle different field value types
-            if isinstance(field, (str, int, float, bool)):
-                return field
-
-            if hasattr(field, 'value'):
-                return field.value
-
-            if hasattr(field, 'name'):
-                return field.name
-
-            if isinstance(field, list):
-                if not field:
-                    return None
-                if hasattr(field[0], 'value'):
-                    return [item.value for item in field]
-                if hasattr(field[0], 'name'):
-                    return [item.name for item in field]
-                return field
-
-            if hasattr(field, 'displayName'):
-                return field.displayName
-
-            return str(field)
         except Exception as e:
             logger.warning(f"[{issue.key}] Error getting Jira field {field_name}: {str(e)}")
             return None
+
+    def _get_comment_field_value(self, issue: Any, field_name: str) -> Optional[str]:
+        """Extract value from comment-related fields."""
+        logger.debug(f"[{issue.key}] Processing comment field '{field_name}'")
+        if not hasattr(issue.fields, 'comment'):
+            logger.debug(f"[{issue.key}] No comments field found")
+            return None
+
+        comments = issue.fields.comment.comments
+        if not comments:
+            return None
+
+        latest_comment = comments[-1]  # Get the most recent comment
+        logger.debug(f"[{issue.key}] Latest comment: {latest_comment}")
+
+        if field_name == 'latest_comment':
+            return latest_comment.body
+        elif field_name == 'comment_author':
+            return (latest_comment.author.displayName 
+                   if hasattr(latest_comment.author, 'displayName') 
+                   else str(latest_comment.author))
+        elif field_name == 'comment_updated':
+            return latest_comment.updated
+        return None
+
+    def _get_status_updated_value(self, issue: Any) -> Optional[str]:
+        """Extract the latest status update time."""
+        logger.debug(f"[{issue.key}] Processing status_updated field")
+        if not hasattr(issue, 'changelog'):
+            logger.debug(f"[{issue.key}] No changelog found")
+            return None
+
+        status_changes = [
+            (history.created, item)
+            for history in issue.changelog.histories
+            for item in history.items if item.field == 'status'
+        ]
+        logger.debug(f"[{issue.key}] Found {len(status_changes)} status changes")
+        if status_changes:
+            # Sort by created date to get the most recent
+            status_changes.sort(key=lambda x: x[0])
+            latest_update_time = status_changes[-1][0]
+            logger.debug(f"[{issue.key}] Latest status change time: {latest_update_time}")
+            return latest_update_time
+        return None
+
+    def _process_field_value(self, field: Any) -> Any:
+        """Process field value based on its type."""
+        if isinstance(field, (str, int, float, bool)):
+            return field
+
+        if hasattr(field, 'value'):
+            return field.value
+
+        if hasattr(field, 'name'):
+            return field.name
+
+        if isinstance(field, list):
+            if not field:
+                return None
+            if hasattr(field[0], 'value'):
+                return [item.value for item in field]
+            if hasattr(field[0], 'name'):
+                return [item.name for item in field]
+            return field
+
+        if hasattr(field, 'displayName'):
+            return field.displayName
+
+        return str(field)
 
     def _transform_jira_issue(self, issue: Any) -> Dict[str, Any]:
         """
@@ -572,17 +587,17 @@ class JiraAirtableSync:
         """
         key_field_id = self._get_airtable_field_id('key')
         id_map = {key: None for key in keys}  # Initialize all keys to None
-        
+
         # Process in chunks to avoid Airtable's formula length limits
         CHUNK_SIZE = 50  # Airtable has limits on formula complexity/length
         key_chunks = [list(keys)[i:i + CHUNK_SIZE] for i in range(0, len(keys), CHUNK_SIZE)]
-        
+
         for chunk in key_chunks:
             # Build OR formula to find any records matching the keys in this chunk
             formula_parts = [f"{{'{key_field_id}'}} = '{key}'" for key in chunk]
             formula = f"OR({','.join(formula_parts)})"
             logger.debug(f"Querying Airtable for {len(chunk)} keys with formula: {formula}")
-            
+
             try:
                 records = self.table.all(formula=formula)
                 for record in records:
@@ -590,23 +605,24 @@ class JiraAirtableSync:
                     if jira_key:
                         id_map[jira_key] = record['id']
             except Exception as e:
-                logger.error(f"Error querying records: {str(e)}", exc_info=True)
-        
+                logger.error(f"Error querying records: {e}", exc_info=True)
+
         return id_map
+
 
     def _get_existing_record_ids(self, jira_keys: List[str]) -> Dict[str, str]:
         """
         Get Airtable record IDs for existing Jira issues.
-        
+
         Args:
             jira_keys: List of Jira issue keys to look up
-            
+
         Returns:
             Dictionary mapping Jira keys to their Airtable record IDs
         """
         if not jira_keys:
             return {}
-            
+
         key_field_id = self._get_airtable_field_id('key')
         key_field_name = self._get_airtable_field_name('key')
         logger.debug(f"Field mappings in _get_existing_record_ids: {self.field_mappings}")
@@ -614,52 +630,137 @@ class JiraAirtableSync:
         if not key_field_id or not key_field_name:
             logger.error("No 'key' field mapping found in field_mappings")
             return {}
-            
+
         logger.debug(f"Looking up existing records for {len(jira_keys)} Jira keys: {jira_keys}")
         logger.debug(f"Using Airtable field '{key_field_name}' for Jira key lookup")
-        
+
         # Get records in chunks to avoid formula length limits
         chunk_size = 100  # Adjust if needed based on key lengths
         key_to_record_id = {}
-        
+
         for i in range(0, len(jira_keys), chunk_size):
             chunk = jira_keys[i:i + chunk_size]
             # Build OR condition for each key - wrap field names with spaces in curly braces
             conditions = [f"{{{key_field_name}}} = '{key}'" for key in chunk]
             formula = f"OR({','.join(conditions)})"
-            
+
             try:
                 logger.debug(f"Querying Airtable with formula: {formula}")
                 records = self.table.all(formula=formula)
                 logger.debug(f"Found {len(records)} matching records")
-                
+
                 # Map each record's key to its ID
                 for record in records:
                     logger.debug(f"Processing record: {record}")
                     jira_key = record['fields'].get(key_field_name)
                     if jira_key:
                         if jira_key in key_to_record_id:
-                            logger.warning(f"Found duplicate record for Jira key {jira_key}. "
-                                         f"Previous record ID: {key_to_record_id[jira_key]}, "
-                                         f"New record ID: {record['id']}")
+                            logger.warning(
+                                f"Found duplicate record for Jira key {jira_key}. "
+                                f"Previous record ID: {key_to_record_id[jira_key]}, "
+                                f"New record ID: {record['id']}"
+                            )
                         key_to_record_id[jira_key] = record['id']
-                        
+
             except Exception as e:
-                logger.error(f"Error looking up records for keys {chunk}: {str(e)}", exc_info=True)
-                
+                logger.error(f"Error looking up records for keys {chunk}: {e}", exc_info=True)
+
         logger.info(f"Found {len(key_to_record_id)} existing records in Airtable")
         return key_to_record_id
+
+    def _process_issue_batch(self, issues: List[Any], existing_record_ids: Dict[str, str]) -> None:
+        """
+        Process a batch of Jira issues and sync them to Airtable.
+
+        Args:
+            issues: List of Jira issues to process
+            existing_record_ids: Dictionary mapping Jira keys to Airtable record IDs
+        """
+        records_to_create = []
+        records_to_update = []
+        keys_to_process = set()
+
+        for issue in issues:
+            key = issue.key
+            keys_to_process.add(key)
+            record_data = self._convert_issue_to_record(issue)
+
+            if key in existing_record_ids:
+                record_id = existing_record_ids[key]
+                records_to_update.append((record_id, record_data))
+            else:
+                records_to_create.append(record_data)
+
+        if records_to_create:
+            logger.info(f"Creating {len(records_to_create)} new records")
+            try:
+                self.table.batch_create(records_to_create)
+            except Exception as e:
+                logger.error(f"Error creating records: {e}", exc_info=True)
+
+        if records_to_update:
+            logger.info(f"Updating {len(records_to_update)} existing records")
+            try:
+                update_data = [(id_, {"fields": data}) for id_, data in records_to_update]
+                self.table.batch_update(update_data)
+            except Exception as e:
+                logger.error(f"Error updating records: {e}", exc_info=True)
+
+        # Update parent relationships after all records are created/updated
+        self._update_parent_relationships(issues, existing_record_ids)
+
+    def _convert_issue_to_record(self, issue: Any) -> Dict[str, Any]:
+        """
+        Convert a Jira issue to an Airtable record format.
+
+        Args:
+            issue: Jira issue to convert
+
+        Returns:
+            Dictionary containing the Airtable record data
+        """
+        record_data = {}
+        for jira_field, airtable_field in self.field_mappings.items():
+            field_value = self._get_issue_field_value(issue, jira_field)
+            if field_value is not None:
+                record_data[airtable_field] = field_value
+        return record_data
+
+    def _update_parent_relationships(self, issues: List[Any], 
+                                  existing_record_ids: Dict[str, str]) -> None:
+        """
+        Update parent-child relationships in Airtable.
+
+        Args:
+            issues: List of Jira issues to process
+            existing_record_ids: Dictionary mapping Jira keys to Airtable record IDs
+        """
+        for issue in issues:
+            if hasattr(issue.fields, 'parent'):
+                child = issue.key
+                parent = issue.fields.parent.key
+
+                if child in existing_record_ids and parent in existing_record_ids:
+                    try:
+                        child_id = existing_record_ids[child]
+                        parent_id = existing_record_ids[parent]
+                        parent_field = self._get_airtable_field_id('parent')
+                        if parent_field:
+                            self.table.update(child_id, {parent_field: [parent_id]})
+                    except Exception as e:
+                        logger.error(f"Error linking {child} -> {parent}: {e}", 
+                                   exc_info=True)
 
     def sync_issues(self) -> None:
         """
         Synchronize Jira issues to Airtable using an incremental approach.
-        
+
         This implementation:
         1. Gets the last sync time from Airtable
         2. Fetches only Jira issues updated since then
         3. First Pass: Creates/updates all records (without parent links)
         4. Second Pass: Updates parent links
-        
+
         This approach ensures efficient syncing by:
         - Only processing recently updated issues
         - Handling both new and existing records
@@ -669,165 +770,63 @@ class JiraAirtableSync:
         """
         try:
             logger.info("Starting Jira to Airtable sync")
-            
+
             # Step 1: Fetch updated Jira issues
             issues = self._fetch_updated_jira_issues()
-            
+
             if not issues:
                 logger.info("No issues found to sync")
                 return
-                
+
             # Step 2: Transform issues and prepare for sync
             transformed_issues = []
             key_to_parent = {}  # Store parent relationships for second pass
             all_keys = set()  # Track all keys for existing record lookup
             transform_errors = []  # Track issues that failed to transform
-            
+
             total_issues = len(issues)
             logger.info(f"Processing {total_issues} issues")
-            
+
             for i, issue in enumerate(issues, 1):
                 if i % 100 == 0:  # Log progress every 100 issues
                     logger.info(f"Transforming issues: {i}/{total_issues}")
-                    
+
                 try:
                     data = self._transform_jira_issue(issue)
                     parent_key = self._get_issue_field_value(issue, 'parent')
-                    
+
                     # Store parent relationship for second pass
                     if parent_key:
                         key_to_parent[issue.key] = parent_key
                         all_keys.add(parent_key)  # Add parent key to lookup set
-                        
+
                     transformed_issues.append((issue.key, data))
                     all_keys.add(issue.key)
                 except Exception as e:
                     transform_errors.append(issue.key)
                     logger.error(f"[{issue.key}] Error transforming issue: {str(e)}", exc_info=True)
-            
+
             logger.info(f"Successfully transformed {len(transformed_issues)} issues")
             if transform_errors:
-                logger.error(f"Failed to transform {len(transform_errors)} issues: {', '.join(transform_errors)}")
+                logger.error(
+                    f"Failed to transform {len(transform_errors)} issues: {', '.join(transform_errors)}"
+                )
             if key_to_parent:
                 logger.info(f"Found {len(key_to_parent)} issues with parent relationships")
-            
+
             # Step 3: First pass - get existing record IDs
             key_to_record_id = self._get_existing_record_ids(list(all_keys))
             existing_count = len(key_to_record_id)
             logger.info(f"Found {existing_count} existing records in Airtable")
-            
+
             # Step 4: Process all records without parent links first
-            records_to_create = []
-            records_to_update = []
-            
-            for jira_key, data in transformed_issues:
-                # Remove parent field for now - we'll update it in the second pass
-                parent_field = self._get_airtable_field_id('parent')
-                if parent_field in data:
-                    del data[parent_field]
-                
-                if jira_key in key_to_record_id:
-                    records_to_update.append({
-                        'id': key_to_record_id[jira_key],
-                        'fields': data
-                    })
-                else:
-                    records_to_create.append(data)
-            
-            # Step 5: First pass - create/update all records
-            create_success = []
-            create_errors = []
-            update_success = 0
-            update_errors = []
-            
-            # Process creates
-            if records_to_create:
-                logger.info(f"Creating {len(records_to_create)} new records")
-                for i in range(0, len(records_to_create), self.batch_size):
-                    batch = records_to_create[i:i + self.batch_size]
-                    success, errors = self._batch_create_with_progress(batch)
-                    create_success.extend(success)
-                    create_errors.extend(errors)
-                    logger.info(f"Created batch of {len(success)} records")
-                    
-                    # Map newly created records to their IDs
-                    for record in success:
-                        key = record['fields'].get(self._get_airtable_field_id('key'))
-                        if key:
-                            key_to_record_id[key] = record['id']
-            
-            # Process updates
-            if records_to_update:
-                logger.info(f"Updating {len(records_to_update)} existing records")
-                for i in range(0, len(records_to_update), self.batch_size):
-                    batch = records_to_update[i:i + self.batch_size]
-                    success_count, errors = self._batch_update_with_progress(batch, include_keys=True)
-                    update_success += success_count
-                    update_errors.extend(errors)
-                    logger.info(f"Updated batch of {success_count} records")
-            
-            # Log first pass results
-            logger.info(f"First Pass Results:")
-            logger.info(f"  Created: {len(create_success)} records")
-            logger.info(f"  Updated: {update_success} records")
-            if create_errors or update_errors:
-                logger.error(f"  Errors: {len(create_errors)} creates, {len(update_errors)} updates")
-            
-            # Step 6: Second pass - update parent relationships
-            if key_to_parent:
-                logger.info("Starting second pass - updating parent relationships")
-                parent_field = self._get_airtable_field_id('parent')
-                
-                # Do another lookup to catch any newly created records
-                logger.info("Refreshing record IDs after first pass")
-                key_to_record_id = self._get_existing_record_ids(list(all_keys))
-                logger.info(f"Found {len(key_to_record_id)} total records after refresh")
-                
-                # Build parent relationship updates
-                parent_updates = []
-                missing_parents = []
-                
-                for child_key, parent_key in key_to_parent.items():
-                    child_record_id = key_to_record_id.get(child_key)
-                    parent_record_id = key_to_record_id.get(parent_key)
-                    
-                    if child_record_id and parent_record_id:
-                        parent_updates.append({
-                            'id': child_record_id,
-                            'fields': {parent_field: [parent_record_id]}
-                        })
-                    else:
-                        missing_parents.append((child_key, parent_key))
-                        if not child_record_id:
-                            logger.error(f"Missing child record ID for {child_key}")
-                        if not parent_record_id:
-                            logger.error(f"Missing parent record ID for {parent_key}")
-                
-                # Process parent updates in batches
-                if parent_updates:
-                    logger.info(f"Updating {len(parent_updates)} parent relationships")
-                    parent_success = 0
-                    parent_errors = []
-                    
-                    for i in range(0, len(parent_updates), self.batch_size):
-                        batch = parent_updates[i:i + self.batch_size]
-                        success_count, errors = self._batch_update_with_progress(batch)
-                        parent_success += success_count
-                        parent_errors.extend(errors)
-                        logger.info(f"Updated batch of {success_count} parent relationships")
-                    
-                    # Log second pass results
-                    logger.info(f"Second Pass Results:")
-                    logger.info(f"  Updated: {parent_success} parent relationships")
-                    if parent_errors:
-                        logger.error(f"  Errors: {len(parent_errors)} updates")
-                    if missing_parents:
-                        logger.error(f"  Missing parents: {len(missing_parents)} relationships")
-                        for child, parent in missing_parents:
-                            logger.error(f"  Could not link {child} -> {parent}")
-            
+            for i in range(0, len(transformed_issues), self.config.batch_size):
+                batch = transformed_issues[i:i + self.config.batch_size]
+                issues_in_batch = [issue for key, issue in batch]
+                self._process_issue_batch(issues_in_batch, key_to_record_id)
+
         except Exception as e:
-            logger.error(f"Error during sync: {str(e)}", exc_info=True)
+            logger.error(f"Error during sync: {e}", exc_info=True)
             raise
 
 def sync_issues(config: SyncConfig) -> None:
@@ -863,5 +862,5 @@ if __name__ == '__main__':
         sync_handler = JiraAirtableSync(config)
         sync_handler.sync_issues()
     except Exception as e:
-        logger.error(f"Error during sync: {str(e)}", exc_info=True)
+        logger.error(f"Error during sync: {e}", exc_info=True)
         raise
