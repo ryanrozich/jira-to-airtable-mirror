@@ -10,20 +10,58 @@ def validate_field_mapping_schema(field_map: Dict[str, Any]) -> Tuple[bool, List
     """Validate the schema of field mappings."""
     errors = []
     
-    for jira_field, airtable_field_id in field_map.items():
+    # Check if field_map is a dictionary
+    if not isinstance(field_map, dict):
+        errors.append(f"Field mappings must be a dictionary, got: {type(field_map)}")
+        return False, errors
+
+    # Check if field_map is empty
+    if not field_map:
+        errors.append("Field mappings dictionary is empty")
+        return False, errors
+
+    # Required Jira fields that should be mapped
+    required_fields = {
+        'summary': 'Issue summary/title',
+        'description': 'Issue description',
+        'status': 'Issue status',
+        'issuetype': 'Issue type',
+        'created': 'Creation date',
+        'updated': 'Last update date'
+    }
+    
+    # Check for missing required fields
+    missing_fields = [f"{field} ({desc})" for field, desc in required_fields.items() 
+                     if field not in field_map]
+    if missing_fields:
+        errors.append("Missing required Jira field mappings:\n      - " + 
+                     "\n      - ".join(missing_fields))
+    
+    for jira_field, airtable_info in field_map.items():
         # Check if Jira field name is a string
         if not isinstance(jira_field, str):
             errors.append(f"Jira field must be a string, got: {type(jira_field)}")
             continue
             
-        # Check if Airtable field ID is a string
-        if not isinstance(airtable_field_id, str):
-            errors.append(f"Airtable field ID for '{jira_field}' must be a string, got: {type(airtable_field_id)}")
+        # Check if airtable_info is a dictionary with required structure
+        if not isinstance(airtable_info, dict):
+            errors.append(f"Mapping for '{jira_field}' must be a dictionary with 'airtable_field_id', got: {type(airtable_info)}")
             continue
             
-        # Optional: validate Airtable field ID format (should start with 'fld')
-        if not airtable_field_id.startswith('fld'):
-            errors.append(f"Invalid Airtable field ID format for '{jira_field}': {airtable_field_id} (should start with 'fld')")
+        # Check for required airtable_field_id key
+        if 'airtable_field_id' not in airtable_info:
+            errors.append(f"Mapping for '{jira_field}' is missing required 'airtable_field_id' key")
+            continue
+            
+        field_id = airtable_info['airtable_field_id']
+        # Check if Airtable field ID is a string
+        if not isinstance(field_id, str):
+            errors.append(f"Airtable field ID for '{jira_field}' must be a string, got: {type(field_id)}")
+            continue
+            
+        # Validate Airtable field ID format (should start with 'fld')
+        if not field_id.startswith('fld'):
+            errors.append(f"Invalid Airtable field ID format for '{jira_field}': {field_id} (should start with 'fld')")
     
     return len(errors) == 0, errors
 
@@ -87,18 +125,48 @@ def check_airtable_config() -> Tuple[bool, str, List[str]]:
 def check_field_mappings() -> Tuple[bool, str, str]:
     """Validate field mappings configuration."""
     try:
-        field_map = json.loads(os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP', '{}'))
-        if not field_map:
+        raw_value = os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP')
+        if not raw_value:
             return False, "No field mappings found", """
             To fix:
             1. Add JIRA_TO_AIRTABLE_FIELD_MAP to your .env file
-            2. Ensure it contains valid JSON mapping Jira fields to Airtable fields
-            3. Example format:
+            2. Use this example format (replace fldXXX with your actual Airtable field IDs):
+            
                {
-                 "summary": "fldXXX",
-                 "description": "fldYYY",
-                 "status": "fldZZZ"
+                 "summary": {"airtable_field_id": "fldXXX"},
+                 "description": {"airtable_field_id": "fldYYY"},
+                 "status": {"airtable_field_id": "fldZZZ"},
+                 "issuetype": {"airtable_field_id": "fldAAA"},
+                 "created": {"airtable_field_id": "fldBBB"},
+                 "updated": {"airtable_field_id": "fldCCC"}
                }
+               
+            To get your Airtable field IDs:
+            1. Open your Airtable base in a web browser
+            2. Click 'Help' -> 'API Documentation'
+            3. Find your table and look for the 'Fields' section
+            4. Each field will have an ID starting with 'fld'
+            """
+        
+        try:
+            field_map = json.loads(raw_value)
+        except json.JSONDecodeError as e:
+            return False, "Invalid JSON in field mappings", f"""
+            JSON parsing error: {str(e)}
+            
+            To fix:
+            1. Check JIRA_TO_AIRTABLE_FIELD_MAP in your .env file
+            2. Ensure it contains valid JSON syntax:
+               - Use double quotes for strings
+               - No trailing commas
+               - Proper nesting of braces
+            3. Use a JSON validator (e.g., jsonlint.com) to check your JSON
+            
+            Example of valid format:
+            {{
+              "summary": {{"airtable_field_id": "fldXXX"}},
+              "description": {{"airtable_field_id": "fldYYY"}}
+            }}
             """
         
         # Validate schema
@@ -109,20 +177,25 @@ def check_field_mappings() -> Tuple[bool, str, str]:
             Schema validation errors:
             {error_list}
             
-            Expected format:
+            Required format for each field mapping:
             {{
-              "jira_field": "fldXXX",
+              "jira_field": {{"airtable_field_id": "fldXXX"}},
               ...
             }}
+            
+            Note:
+            - Each Jira field must map to a dictionary containing 'airtable_field_id'
+            - All Airtable field IDs must start with 'fld'
+            - Required Jira fields: summary, description, status, issuetype, created, updated
             """
         
         return True, f"Field mappings configured ({len(field_map)} fields)", ""
-    except json.JSONDecodeError:
-        return False, "Invalid JSON in field mappings", """
-        To fix:
-        1. Check JIRA_TO_AIRTABLE_FIELD_MAP in your .env file
-        2. Ensure it contains valid JSON syntax
-        3. Use a JSON validator if needed
+    except Exception as e:
+        return False, "Unexpected error in field mappings", f"""
+        An unexpected error occurred: {str(e)}
+        
+        Please check your field mappings configuration and try again.
+        If the error persists, please report this issue.
         """
 
 def main():
