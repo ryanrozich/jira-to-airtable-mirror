@@ -85,6 +85,7 @@ module "jira_mirror_lambda" {
     MAX_RESULTS            = var.max_results
     BATCH_SIZE             = var.batch_size
     TZ                     = "UTC"
+    LOG_LEVEL              = var.log_level
     JIRA_API_TOKEN_SECRET_ARN     = var.jira_api_token_secret_arn
     AIRTABLE_API_KEY_SECRET_ARN   = var.airtable_api_key_secret_arn
   }

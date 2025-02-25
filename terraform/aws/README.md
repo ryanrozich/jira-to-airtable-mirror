@@ -39,6 +39,11 @@ graph LR
     style K fill:#fff5e6,stroke:#333,stroke-width:2px
 ```
 
+## Documentation
+
+- [Metrics Monitoring](./docs/metrics.md): Details about available metrics and how to monitor them
+- [Notifications](./docs/notifications.md): Information about SNS notifications and subscription options
+
 ## Required AWS Permissions
 
 The AWS user executing the deployment needs the following permissions:
@@ -200,6 +205,37 @@ jira_to_airtable_field_map = {
   # Add more field mappings as needed
 }
 ```
+
+## Just Commands
+
+The following Just commands are available for AWS Lambda management:
+
+### Deployment Commands
+- `just lambda-build`: Build the Lambda container image
+- `just lambda-push`: Push the container image to ECR
+- `just lambda-deploy`: Deploy the Lambda function (includes build and push)
+- `just lambda-update`: Update Lambda function code without changing configuration
+
+### Monitoring Commands
+- `just lambda-invoke`: Manually trigger the Lambda function
+- `just lambda-logs`: View CloudWatch logs for the function in real-time
+- `just lambda-logs-recent [minutes]`: View recent logs (default: last 30 minutes)
+- `just lambda-logs-level [level] [minutes]`: View logs filtered by level
+  - Levels: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
+  - Shows logs at specified level and higher
+  - Example: `just lambda-logs-level level=WARNING minutes=60`
+- `just lambda-metrics [period]`: View function metrics
+  - Supports periods: `1h`, `24h`, `7d`
+  - Shows comprehensive metrics including:
+    - Invocations and errors
+    - Duration statistics
+    - Memory utilization
+    - Network usage
+    - Concurrency stats
+
+For detailed information about metrics and notifications, see:
+- [Metrics Monitoring Guide](./docs/metrics.md)
+- [Notifications Guide](./docs/notifications.md)
 
 ## Configuration System
 

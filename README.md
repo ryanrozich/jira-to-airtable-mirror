@@ -18,6 +18,19 @@ The service periodically fetches issues from Jira and updates corresponding reco
 - Uses AWS Secrets Manager for secure credential storage in Lambda
 - Infrastructure managed with Terraform
 - Automated deployment with Just command runner
+- Comprehensive metrics monitoring and alerting
+- SNS notifications for errors and sync status
+
+## Documentation
+
+- [AWS Lambda Deployment](./terraform/aws/README.md)
+  - [Metrics Monitoring](./terraform/aws/docs/metrics.md)
+  - [Notifications](./terraform/aws/docs/notifications.md)
+- [Development Guide](./scripts/README.md)
+- [Schema Documentation](./scripts/schema/README.md)
+- [Testing Guide](./scripts/tests/README.md)
+- [Utilities](./scripts/utils/README.md)
+- [Validation](./scripts/validation/README.md)
 
 ## Prerequisites
 
@@ -193,6 +206,42 @@ This incremental approach provides several benefits:
 
 This pattern ensures that syncs are efficient and can be run frequently to keep your Airtable data up to date.
 
+## Just Commands
+
+The project uses [Just](https://github.com/casey/just) as a command runner. Here are the available commands:
+
+### Local Development
+- `just install`: Install Python dependencies
+- `just test`: Run the test suite
+- `just lint`: Run linting checks
+- `just format`: Format Python code
+- `just run`: Run the sync process locally
+- `just docker-build`: Build the Docker image
+- `just docker-run`: Run the sync process in Docker
+
+### AWS Lambda Commands
+- `just lambda-build`: Build the Lambda container image
+- `just lambda-push`: Push the container image to ECR
+- `just lambda-deploy`: Deploy the Lambda function
+- `just lambda-invoke`: Manually trigger the Lambda function
+- `just lambda-logs`: View CloudWatch logs in real-time
+- `just lambda-logs-recent [minutes]`: View recent logs
+- `just lambda-logs-level [level] [minutes]`: Filter logs by level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
+- `just lambda-metrics [period]`: View Lambda metrics
+  - `period`: `1h` (last hour), `24h` (last day), or `7d` (last week)
+  - Shows invocations, errors, duration, memory, network stats
+- `just lambda-update`: Update Lambda function code
+
+### Configuration
+- `just validate-env`: Validate environment variables
+- `just validate-config`: Validate field mappings
+- `just generate-schema`: Generate JSON schema for config
+
+For detailed information about AWS deployment and monitoring, see:
+- [AWS Lambda Deployment Guide](./terraform/aws/README.md)
+- [Metrics Monitoring](./terraform/aws/docs/metrics.md)
+- [Notifications](./terraform/aws/docs/notifications.md)
+
 ## Local Development
 
 ### Option 1: Direct Python Development
@@ -315,6 +364,7 @@ The `justfile` provides several commands to streamline development and deploymen
 - `just lambda-invoke` - Manually trigger the Lambda function
 - `just lambda-logs` - View Lambda logs in real-time
 - `just lambda-logs-recent [minutes]` - View recent Lambda logs (default: last 30 minutes)
+- `just lambda-logs-level [level] [minutes]` - Filter Lambda logs by level (DEBUG/INFO/WARNING/ERROR/CRITICAL)
 - `just lambda-image` - View Lambda container image details
 - `just lambda-destroy` - Safely destroy all AWS infrastructure
 

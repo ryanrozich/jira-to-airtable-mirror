@@ -72,3 +72,9 @@ variable "batch_size" {
   type        = string
   default     = "50"
 }
+
+variable "log_level" {
+  description = "Log level for the Lambda function (DEBUG, INFO, WARNING, ERROR)"
+  type        = string
+  default     = "INFO"
+}
