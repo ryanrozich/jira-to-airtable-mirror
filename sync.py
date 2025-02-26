@@ -4,11 +4,11 @@ import time
 from datetime import datetime
 from functools import wraps
 from logging import getLogger
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import pytz
 from jira import JIRA
 from pyairtable import Api, Table
-from pyairtable.formulas import match
 
 from config import SyncConfig, get_config_loader
 
@@ -141,8 +141,6 @@ class JiraAirtableSync:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
-                # Convert method args to function args if this is a method
-                method_args = args[1:] if len(args) > 0 and isinstance(args[0], JiraAirtableSync) else args
                 
                 for i in range(retries):
                     try:
@@ -159,12 +157,10 @@ class JiraAirtableSync:
             return wrapper
         return decorator
 
-    def _format_jira_timestamp(self, timestamp: str) -> str:
-        """Convert ISO timestamp to Jira-compatible format in configured timezone."""
-        from datetime import datetime
-        import pytz
+    def _format_jira_timestamp(self, timestamp: str) -> Optional[str]:
+        """Format a timestamp for use in Jira JQL queries."""
         try:
-            # Parse ISO format timestamp (which is in UTC)
+            # Parse ISO format timestamp
             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
             
             # Convert to configured timezone
@@ -173,19 +169,20 @@ class JiraAirtableSync:
             
             # Format to Jira's supported minute precision
             formatted = local_dt.strftime('%Y-%m-%d %H:%M')
-            logger.debug(f"Converting timestamp from UTC ({timestamp}) to Jira instance timezone {self._get_jira_timezone()} ({formatted})")
+            logger.debug(f"Converting timestamp from UTC ({timestamp}) to "
+                        f"Jira instance timezone {self._get_jira_timezone()} ({formatted})")
             return formatted
         except Exception as e:
-            logger.error(f"Error formatting timestamp {timestamp}: {str(e)}")
-            return timestamp
+            logger.error(f"Error formatting timestamp {timestamp}: {e}")
+            return None
 
     def _format_bytes(self, num_bytes: int) -> str:
         """
         Format bytes into human readable string (e.g., KB, MB, GB).
-        
+
         Args:
             num_bytes: Number of bytes to format
-            
+
         Returns:
             Formatted string with appropriate unit
         """

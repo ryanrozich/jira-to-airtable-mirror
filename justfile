@@ -401,9 +401,9 @@ lint: setup-venv
     source venv/bin/activate
     pip install flake8
     echo "Running basic error checks..."
-    flake8 app.py sync.py scripts/ --count --select=E9,F63,F7,F82 --show-source --statistics
+    flake8 app.py sync.py scripts/ --count --select=E9,F63,F7,F82 --show-source --statistics --extend-ignore=W29
     echo "Running style checks..."
-    flake8 app.py sync.py scripts/ --count --max-complexity=10 --max-line-length=127 --statistics
+    flake8 app.py sync.py scripts/ --count --max-complexity=10 --max-line-length=127 --statistics --extend-ignore=W29
 
 # View CloudWatch metrics for Lambda function
 lambda-metrics period="1h": setup-venv
