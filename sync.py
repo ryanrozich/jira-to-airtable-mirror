@@ -118,13 +118,24 @@ class JiraAirtableSync:
         return None
 
     def _get_airtable_field_id(self, jira_field: str) -> Optional[str]:
-        """Get the Airtable field ID for a given Jira field."""
-        logger.debug(f"Getting Airtable field ID for Jira field '{jira_field}'")
-        logger.debug(f"Field mappings: {self.field_mappings}")
+        """
+        Get the Airtable field ID for a given Jira field.
+        
+        Args:
+            jira_field: Jira field name
+            
+        Returns:
+            Airtable field ID or None if not found
+        """
         if jira_field in self.field_mappings:
-            field_id = self.field_mappings[jira_field].get('airtable_field_id')
-            logger.debug(f"Found field ID: {field_id}")
-            return field_id
+            mapping = self.field_mappings[jira_field]
+            if isinstance(mapping, dict) and 'airtable_field_id' in mapping:
+                return mapping['airtable_field_id']
+            elif isinstance(mapping, str):
+                # For backward compatibility with old format
+                return mapping
+        
+        logger.warning(f"No Airtable field mapping found for Jira field: {jira_field}")
         return None
 
     def retry_with_backoff(retries: int = 3, backoff_in_seconds: int = 1) -> Callable:
@@ -286,25 +297,34 @@ class JiraAirtableSync:
         return all_issues
 
     @retry_with_backoff(retries=3, backoff_in_seconds=1)
-    def _batch_create_with_progress(self, batch: List[Dict]) -> Tuple[List[Dict], List[str]]:
+    def _batch_create_with_progress(self, records: List[Dict[str, Any]]) -> Tuple[int, List[Dict[str, Any]]]:
         """
-        Create a batch of records with progress tracking and error handling.
+        Create records in batches with progress tracking and error handling.
         
         Args:
-            batch: List of records to create
+            records: List of records to create
             
         Returns:
-            Tuple of (successful records, failed Jira keys)
+            Tuple containing count of created records and list of failed records
         """
+        created_count = 0
+        failed_records = []
+        
         try:
-            # For batch_create, we just pass the fields directly
-            records = self.table.batch_create(batch)
-            return records, []
+            created = self.table.batch_create(records)
+            created_count = len(created)
         except Exception as e:
-            logger.error(f"Error in batch create: {str(e)}", exc_info=True)
-            # Extract Jira keys from the batch for error tracking
-            failed_keys = [record.get(self._get_airtable_field_id('key')) for record in batch]
-            return [], [key for key in failed_keys if key]
+            logger.error(f"Error in batch creation: {str(e)}")
+            # If the batch fails, try creating records one by one to identify problematic records
+            for record in records:
+                try:
+                    self.table.create(record)
+                    created_count += 1
+                except Exception as record_error:
+                    logger.warning(f"Failed to create record: {str(record_error)}")
+                    failed_records.append(record)
+        
+        return created_count, failed_records
 
     @retry_with_backoff(retries=3, backoff_in_seconds=1)
     def _batch_update_with_progress(self, batch: List[Union[Dict, Tuple]], include_keys: bool = False) -> Tuple[int, List[str]]:
@@ -494,36 +514,53 @@ class JiraAirtableSync:
 
         return str(field)
 
-    def _transform_jira_issue(self, issue: Any) -> Dict[str, Any]:
+    def _convert_issue_to_record(self, issue: Any) -> Dict[str, Any]:
         """
-        Transform Jira issue to Airtable record format.
-
-        This method iterates through the field mappings and extracts the corresponding values from the Jira issue.
-        The field_mappings dictionary has Jira field names as keys and Airtable field IDs as values.
+        Convert a Jira issue to an Airtable record format.
 
         Args:
-            issue: Jira issue object
+            issue: Jira issue to convert (object or dictionary)
 
         Returns:
-            Dictionary representing the Airtable record
+            Dictionary containing the Airtable record data
         """
-        record = {}
-        issue_key = issue.key
-
-        # Iterate through the field mappings (Jira field name -> Airtable field ID)
-        for jira_field, airtable_info in self.field_mappings.items():
-            logger.debug(f"[{issue_key}] Transforming Jira field '{jira_field}' to Airtable field ID '{airtable_info['airtable_field_id']}'")
+        record_data = {}
+        
+        # If the issue is already in dictionary format with field IDs, just return it
+        if isinstance(issue, dict):
+            # Check if this is already formatted for Airtable (has field IDs as keys)
+            # We'll check if at least one key matches our expected Airtable field IDs pattern
+            has_field_ids = any(key.startswith('fld') for key in issue.keys())
+            if has_field_ids:
+                return issue
+                
+            # Otherwise, we need to convert from a Jira dictionary to Airtable format
+            # This would happen if we have a dict with Jira field names instead of Airtable field IDs
+            for jira_field, airtable_field in self.field_mappings.items():
+                airtable_field_id = airtable_field['airtable_field_id']
+                
+                # Skip parent field - we'll handle parent relationships separately
+                if jira_field == 'parent':
+                    continue
+                    
+                if jira_field in issue:
+                    value = issue[jira_field]
+                    record_data[airtable_field_id] = value
+            return record_data
             
-            try:
-                value = self._get_issue_field_value(issue, jira_field)
-                logger.debug(f"[{issue_key}] Got value for {jira_field}: {value}")
-                if value is not None:
-                    record[airtable_info['airtable_field_id']] = value
-            except Exception as e:
-                logger.warning(f"[{issue_key}] Error transforming field {jira_field}: {str(e)}")
+        # For object format (standard Jira issue object)
+        for jira_field, airtable_field in self.field_mappings.items():
+            airtable_field_id = airtable_field['airtable_field_id']
+            
+            # Skip parent field - we'll handle parent relationships separately
+            if jira_field == 'parent':
                 continue
-
-        return record
+                
+            field_value = self._get_issue_field_value(issue, jira_field)
+            if field_value is not None:
+                record_data[airtable_field_id] = field_value
+                
+        return record_data
 
     def add_select_option(self, field_name: str, option: str) -> None:
         """
@@ -678,50 +715,82 @@ class JiraAirtableSync:
         keys_to_process = set()
 
         for issue in issues:
-            key = issue.key
+            # Handle both dictionary and object formats
+            if isinstance(issue, dict):
+                # For dictionary format, get the key from the field ID that corresponds to "key"
+                key_field_id = self._get_airtable_field_id('key')
+                key = issue.get(key_field_id)
+                if not key:
+                    logger.warning(f"Could not find Jira key in issue dictionary using field ID {key_field_id}")
+                    continue
+            else:
+                # For object format, get the key directly
+                key = issue.key
+                
             keys_to_process.add(key)
             record_data = self._convert_issue_to_record(issue)
 
-            if key in existing_record_ids:
+            # Check if this issue already exists in Airtable
+            if key in existing_record_ids and existing_record_ids[key]:
+                # Update existing record
                 record_id = existing_record_ids[key]
-                records_to_update.append((record_id, record_data))
+                records_to_update.append({"id": record_id, "fields": record_data})
+                logger.debug(f"Updating existing record for {key} (Airtable ID: {record_id})")
             else:
+                # Create new record
                 records_to_create.append(record_data)
-
+                logger.debug(f"Creating new record for {key}")
+        
         if records_to_create:
             logger.info(f"Creating {len(records_to_create)} new records")
             try:
-                self.table.batch_create(records_to_create)
+                created, failed = self._batch_create_with_progress(records_to_create)
+                logger.info(f"Created {created} new records")
+                if failed:
+                    logger.warning(f"Failed to create {len(failed)} records: {failed}")
             except Exception as e:
-                logger.error(f"Error creating records: {e}", exc_info=True)
+                logger.error(f"Error creating records: {str(e)}")
+                raise
 
         if records_to_update:
             logger.info(f"Updating {len(records_to_update)} existing records")
             try:
-                update_data = [(id_, {"fields": data}) for id_, data in records_to_update]
-                self.table.batch_update(update_data)
+                # The records_to_update is now in the format expected by batch_update
+                self.table.batch_update(records_to_update)
+                logger.info(f"Updated {len(records_to_update)} records")
             except Exception as e:
-                logger.error(f"Error updating records: {e}", exc_info=True)
+                logger.error(f"Error updating records: {str(e)}")
+                raise
 
         # Update parent relationships after all records are created/updated
         self._update_parent_relationships(issues, existing_record_ids)
 
-    def _convert_issue_to_record(self, issue: Any) -> Dict[str, Any]:
+    def _extract_parent_key(self, issue: Any) -> Optional[str]:
         """
-        Convert a Jira issue to an Airtable record format.
-
+        Extract the parent key from a Jira issue.
+        
         Args:
-            issue: Jira issue to convert
-
+            issue: Jira issue (object or dictionary)
+            
         Returns:
-            Dictionary containing the Airtable record data
+            Parent key or None if no parent
         """
-        record_data = {}
-        for jira_field, airtable_field in self.field_mappings.items():
-            field_value = self._get_issue_field_value(issue, jira_field)
-            if field_value is not None:
-                record_data[airtable_field] = field_value
-        return record_data
+        if isinstance(issue, dict):
+            # For dictionary format, check if parent exists
+            parent_field = None
+            for jira_field, airtable_field in self.field_mappings.items():
+                if jira_field == 'parent':
+                    parent_field = jira_field
+                    break
+            
+            if parent_field and parent_field in issue:
+                return issue[parent_field]
+        else:
+            # For object format
+            if hasattr(issue, 'fields') and hasattr(issue.fields, 'parent'):
+                return issue.fields.parent.key
+                
+        return None
 
     def _update_parent_relationships(self, issues: List[Any], 
                                   existing_record_ids: Dict[str, str]) -> None:
@@ -732,21 +801,56 @@ class JiraAirtableSync:
             issues: List of Jira issues to process
             existing_record_ids: Dictionary mapping Jira keys to Airtable record IDs
         """
+        parent_updates = []
+        
         for issue in issues:
-            if hasattr(issue.fields, 'parent'):
-                child = issue.key
-                parent = issue.fields.parent.key
-
-                if child in existing_record_ids and parent in existing_record_ids:
-                    try:
-                        child_id = existing_record_ids[child]
-                        parent_id = existing_record_ids[parent]
-                        parent_field = self._get_airtable_field_id('parent')
-                        if parent_field:
-                            self.table.update(child_id, {parent_field: [parent_id]})
-                    except Exception as e:
-                        logger.error(f"Error linking {child} -> {parent}: {e}", 
-                                   exc_info=True)
+            # Get the issue key based on the type
+            if isinstance(issue, dict):
+                key_field_id = self._get_airtable_field_id('key')
+                if not key_field_id or key_field_id not in issue:
+                    logger.warning(f"Could not find key field in issue: {issue}")
+                    continue
+                issue_key = issue[key_field_id]
+            else:
+                issue_key = issue.key
+                
+            parent_key = self._extract_parent_key(issue)
+            if parent_key:
+                logger.debug(f"Processing parent relationship: {issue_key} -> {parent_key}")
+                
+                # Skip if either child or parent is not in Airtable
+                if issue_key not in existing_record_ids:
+                    logger.warning(f"Child issue {issue_key} not found in Airtable")
+                    continue
+                if parent_key not in existing_record_ids:
+                    logger.warning(f"Parent issue {parent_key} not found in Airtable")
+                    continue
+                        
+                child_record_id = existing_record_ids[issue_key]
+                parent_record_id = existing_record_ids[parent_key]
+                
+                # Get the field ID for parent
+                parent_field_id = self._get_airtable_field_id('parent')
+                if not parent_field_id:
+                    logger.warning("Missing parent field ID in field mappings")
+                    continue
+                    
+                # Add to batch updates
+                parent_updates.append({
+                    "id": child_record_id,
+                    "fields": {
+                        parent_field_id: [parent_record_id]  # Must be an array of record IDs
+                    }
+                })
+        
+        # Process all parent updates in a single batch
+        if parent_updates:
+            try:
+                logger.info(f"Updating {len(parent_updates)} parent relationships")
+                self.table.batch_update(parent_updates)
+                logger.info(f"Successfully updated parent relationships")
+            except Exception as e:
+                logger.error(f"Error updating parent relationships: {str(e)}")
 
     def sync_issues(self) -> None:
         """
@@ -789,8 +893,8 @@ class JiraAirtableSync:
                     logger.info(f"Transforming issues: {i}/{total_issues}")
 
                 try:
-                    data = self._transform_jira_issue(issue)
-                    parent_key = self._get_issue_field_value(issue, 'parent')
+                    data = self._convert_issue_to_record(issue)
+                    parent_key = self._extract_parent_key(issue)
 
                     # Store parent relationship for second pass
                     if parent_key:
