@@ -156,35 +156,31 @@ class AWSConfigLoader(ConfigLoader):
         try:
             if not self.region:
                 self.region = secret_arn.split(':')[3]  # Extract region from ARN
-            
-            logger.info(f"Fetching secret from ARN: {secret_arn[:8]}...{secret_arn[-8:]}")
+            sanitized_arn = f"{secret_arn[:8]}...{secret_arn[-8:]}"
+            logger.info(f"Fetching secret from ARN: {sanitized_arn}")
             response = self.secrets_client.get_secret_value(SecretId=secret_arn)
             
             if 'SecretString' in response:
                 secret_value = response['SecretString']
                 if not secret_value:
-                    logger.error(f"Secret {secret_arn} exists but contains an empty string")
-                    raise ValueError(f"Secret {secret_arn} contains an empty string")
+                    logger.error("A secret exists but contains an empty string")
+                    raise ValueError("A secret contains an empty string")
                 
                 # Ensure proper string encoding and remove any whitespace
                 secret_value = secret_value.encode('utf-8').decode('utf-8').strip()
-                logger.info(f"Successfully retrieved secret from {secret_arn} (length: {len(secret_value)})")
-                
-                # Log the first few characters to help with debugging
-                if len(secret_value) > 0:
-                    logger.debug(f"First few characters of secret: {secret_value[:4]}...")
-                
+                logger.info("Successfully retrieved secret")
+                               
                 return secret_value
             
-            logger.error(f"Secret {secret_arn} does not contain a SecretString")
-            raise ValueError(f"Secret {secret_arn} does not contain a string value")
+            logger.error(f"Secret {sanitized_arn} does not contain a SecretString")
+            raise ValueError(f"Secret {sanitized_arn} does not contain a string value")
         except ClientError as e:
             error_code = e.response['Error']['Code']
             error_message = e.response['Error']['Message']
-            logger.error(f"AWS Error fetching secret {secret_arn}: {error_code} - {error_message}")
+            logger.error(f"AWS Error fetching secret {sanitized_arn}: {error_code} - {error_message}")
             raise
         except Exception as e:
-            logger.error(f"Unexpected error fetching secret {secret_arn}: {str(e)}")
+            logger.error(f"Unexpected error fetching secret {sanitized_arn}: {str(e)}")
             raise
 
     def load(self) -> SyncConfig:
@@ -202,7 +198,7 @@ class AWSConfigLoader(ConfigLoader):
             jira_token = self.get_secret(jira_token_arn)
             airtable_key = self.get_secret(airtable_key_arn)
             logger.info("Successfully retrieved secrets")
-        except Exception as e:
+        except Exception:
             logger.error("Failed to retrieve secrets", exc_info=True)
             raise
 
