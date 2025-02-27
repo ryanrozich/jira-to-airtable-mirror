@@ -157,7 +157,7 @@ class AWSConfigLoader(ConfigLoader):
             if not self.region:
                 self.region = secret_arn.split(':')[3]  # Extract region from ARN
             
-            logger.info(f"Fetching secret from ARN: {secret_arn}")
+            logger.info(f"Fetching secret from ARN: {secret_arn[:8]}...{secret_arn[-8:]}")
             response = self.secrets_client.get_secret_value(SecretId=secret_arn)
             
             if 'SecretString' in response:
