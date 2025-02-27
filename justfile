@@ -61,6 +61,17 @@ docker-clean:
     docker rmi {{app_name}}:local {{app_name}}:lambda || true
     echo "✅ Docker cleanup complete"
 
+# Clean up local development resources
+clean: docker-clean
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🧹 Cleaning up local development resources..."
+    rm -rf venv
+    rm -rf __pycache__
+    rm -rf .pytest_cache
+    rm -rf .coverage
+    echo "✅ Local cleanup complete"
+
 # Build for AWS Lambda
 lambda-build:
     #!/usr/bin/env bash
@@ -215,98 +226,18 @@ validate-connectivity: setup-venv
     export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
     python -c "from scripts.validation import connectivity; connectivity.main()"
 
-# Run CodeQL analysis locally (requires CodeQL CLI: https://github.com/github/codeql-cli-binaries)
+# Security scan information
 security-scan:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "🔒 Running CodeQL security scan..."
-    if ! command -v codeql &> /dev/null; then
-        echo "❌ CodeQL CLI not found. Please install it first:"
-        echo "https://github.com/github/codeql-cli-binaries"
-        exit 1
-    fi
-    
-    # Create CodeQL database
-    codeql database create .codeql-db --language=python --source-root=.
-    
-    # Run analysis
-    codeql database analyze .codeql-db \
-        --format=sarif-latest \
-        --output=codeql-results.sarif \
-        security-and-quality.qls
-    
-    echo "✅ Analysis complete. Results saved to codeql-results.sarif"
-
-# Clean up local development resources
-clean: docker-clean
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "🧹 Cleaning up local development resources..."
-    rm -rf venv
-    rm -rf __pycache__
-    rm -rf .pytest_cache
-    rm -rf .coverage
-    echo "✅ Local cleanup complete"
-
-# Internal function to get logs with time filtering
-_lambda-logs-filtered region time ascending="false":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    
-    # Convert time to date adjustment format
-    case "{{time}}" in
-        *h)
-            TIME_ADJ="-$(echo {{time}} | sed 's/h//g')H"
-            ;;
-        *m)
-            TIME_ADJ="-$(echo {{time}} | sed 's/m//g')M"
-            ;;
-        *)
-            echo "❌ Invalid time format. Use: 30m, 1h, 2h, etc."
-            exit 1
-            ;;
-    esac
-    
-    # Convert time to milliseconds for the query
-    START_TIME=$(date -v"$TIME_ADJ" +%s)000
-    
-    # Run CloudWatch Logs Insights query
-    QUERY="fields @timestamp, @message"
-    if [ "{{ascending}}" = "true" ]; then
-        QUERY="${QUERY} | sort @timestamp asc"
-    else
-        QUERY="${QUERY} | sort @timestamp desc"
-    fi
-    
-    echo "🔍 Query: $QUERY"  # Debug output
-    
-    # Start the query and get query ID
-    QUERY_ID=$(aws {{aws_cli_opts}} logs start-query \
-        --log-group-name /aws/lambda/{{app_name}} \
-        --start-time $START_TIME \
-        --end-time $(date +%s)000 \
-        --region {{region}} \
-        --query-string "$QUERY" \
-        --output text \
-        --query 'queryId')
-    
-    # Poll for results
-    while true; do
-        RESULTS=$(aws {{aws_cli_opts}} logs get-query-results --query-id "$QUERY_ID" --region {{region}})
-        STATUS=$(echo "$RESULTS" | jq -r .status)
-        if [ "$STATUS" = "Complete" ]; then
-            echo "$RESULTS" | \
-                jq -r ".results[] | [.[0].value, .[1].value] | @tsv" | \
-                while IFS=$"\t" read -r timestamp message; do
-                    printf "%s %s\n" "$timestamp" "$message"
-                done
-            break
-        elif [ "$STATUS" = "Failed" ]; then
-            echo "❌ Query failed"
-            break
-        fi
-        sleep 1
-    done
+    echo "ℹ️  Security scanning is handled by GitHub Actions"
+    echo ""
+    echo "This project uses GitHub's CodeQL for security scanning, which runs"
+    echo "automatically on pull requests and pushes to the main branch."
+    echo ""
+    echo "The workflow is defined in: .github/workflows/codeql.yml"
+    echo ""
+    echo "To view security scan results, check the 'Security' tab in the GitHub repository."
 
 # Get recent AWS Lambda logs
 lambda-logs-recent time="15m" region=default_region:
@@ -488,3 +419,63 @@ lambda-scheduler-status region=default_region:
     else
         echo "⭕ Scheduler is PAUSED"
     fi
+
+# Internal function to get logs with time filtering
+_lambda-logs-filtered region time ascending="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    
+    # Convert time to date adjustment format
+    case "{{time}}" in
+        *h)
+            TIME_ADJ="-$(echo "{{time}}" | sed 's/h//g')H"
+            ;;
+        *m)
+            TIME_ADJ="-$(echo "{{time}}" | sed 's/m//g')M"
+            ;;
+        *)
+            echo "❌ Invalid time format. Use: 30m, 1h, 2h, etc."
+            exit 1
+            ;;
+    esac
+    
+    # Convert time to milliseconds for the query
+    START_TIME=$(date -v"$TIME_ADJ" +%s)000
+    
+    # Run CloudWatch Logs Insights query
+    QUERY="fields @timestamp, @message"
+    if [ "{{ascending}}" = "true" ]; then
+        QUERY="${QUERY} | sort @timestamp asc"
+    else
+        QUERY="${QUERY} | sort @timestamp desc"
+    fi
+    
+    echo "🔍 Query: $QUERY"  # Debug output
+    
+    # Start the query and get query ID
+    QUERY_ID=$(aws {{aws_cli_opts}} logs start-query \
+        --log-group-name /aws/lambda/{{app_name}} \
+        --start-time $START_TIME \
+        --end-time $(date +%s)000 \
+        --region {{region}} \
+        --query-string "$QUERY" \
+        --output text \
+        --query 'queryId')
+    
+    # Poll for results
+    while true; do
+        RESULTS=$(aws {{aws_cli_opts}} logs get-query-results --query-id "$QUERY_ID" --region {{region}})
+        STATUS=$(echo "$RESULTS" | jq -r .status)
+        if [ "$STATUS" = "Complete" ]; then
+            echo "$RESULTS" | \
+                jq -r ".results[] | [.[0].value, .[1].value] | @tsv" | \
+                while IFS=$"\t" read -r timestamp message; do
+                    printf "%s %s\n" "$timestamp" "$message"
+                done
+            break
+        elif [ "$STATUS" = "Failed" ]; then
+            echo "❌ Query failed"
+            break
+        fi
+        sleep 1
+    done
