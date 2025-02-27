@@ -1,32 +1,50 @@
+"""AWS Lambda handler for Jira to Airtable sync."""
+
+import json
 import logging
-from dotenv import load_dotenv
-from sync import sync_issues, load_config
+import os
+from typing import Any, Dict
 
+from config import get_config_loader
+from sync import sync_issues
 
+# Configure logging
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger.setLevel(os.getenv('LOG_LEVEL', 'INFO').upper())
 
-
-def lambda_handler(event, context):
-    """
-    AWS Lambda handler function
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """AWS Lambda handler function.
+    
+    Args:
+        event: Lambda event
+        context: Lambda context
+        
+    Returns:
+        Response dictionary
     """
     try:
-        logger.info("Starting Jira to Airtable sync")
-        load_dotenv()
-        config = load_config()
+        # Load configuration using AWS config loader
+        config_loader = get_config_loader('aws')
+        config = config_loader.load()
+        
+        # Run sync
         sync_issues(config)
-        logger.info("Sync completed successfully")
+        
         return {
             'statusCode': 200,
-            'body': 'Sync completed successfully'
+            'body': json.dumps({'message': 'Sync completed successfully'})
         }
     except Exception as e:
-        logger.error(f"Error during sync: {str(e)}")
-        raise
-
+        logger.error(f"Error during sync: {str(e)}", exc_info=True)
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': str(e)})
+        }
 
 def main():
-    load_dotenv()
-    config = load_config()
+    # Load configuration using AWS config loader
+    config_loader = get_config_loader('aws')
+    config = config_loader.load()
+    
+    # Run sync
     sync_issues(config)

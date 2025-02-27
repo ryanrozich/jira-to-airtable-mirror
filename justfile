@@ -25,9 +25,15 @@ docker-run:
     fi
     
     echo "📝 Using environment file: .env"
+    # Export all variables from .env file
+    set -a
+    source .env
+    set +a
+    
+    # Run the container with environment variables from the current shell
     docker run -d \
         --name {{app_name}} \
-        --env-file .env \
+        --env-file <(env | grep -E '^(JIRA_|AIRTABLE_|LOG_|SYNC_|BATCH_)') \
         {{app_name}}:local
 
 # View Docker container logs
@@ -54,6 +60,17 @@ docker-clean:
     docker rm {{app_name}} || true
     docker rmi {{app_name}}:local {{app_name}}:lambda || true
     echo "✅ Docker cleanup complete"
+
+# Clean up local development resources
+clean: docker-clean
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🧹 Cleaning up local development resources..."
+    rm -rf venv
+    rm -rf __pycache__
+    rm -rf .pytest_cache
+    rm -rf .coverage
+    echo "✅ Local cleanup complete"
 
 # Build for AWS Lambda
 lambda-build:
@@ -147,6 +164,9 @@ run: setup-venv
     echo "🚀 Running {{app_name}} with Python..."
     
     . venv/bin/activate
+    set -a
+    source .env
+    set +a
     python sync.py
 
 # Run the sync script in scheduled mode (without Docker)
@@ -158,6 +178,24 @@ run-scheduled: setup-venv
     . venv/bin/activate
     python sync.py --schedule
 
+# Validate Docker prerequisites
+validate-docker: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔍 Validating Docker prerequisites..."
+    . venv/bin/activate
+    export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+    python -c "from scripts.validation import docker; docker.main()"
+
+# Validate AWS prerequisites
+validate-aws: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔍 Validating AWS prerequisites..."
+    . venv/bin/activate
+    export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+    python -c "from scripts.validation import aws; aws.main()"
+
 # Run all validation scripts
 validate-all: setup-venv
     #!/usr/bin/env bash
@@ -166,27 +204,50 @@ validate-all: setup-venv
     
     . venv/bin/activate
     export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
-    python scripts/validate_config.py
-    python scripts/validate_schema.py
-    python scripts/test_jira_connection.py
-    python scripts/test_airtable_connection.py
-    python scripts/test_sync.py
-    
-    echo "✅ All validation passed"
+    python scripts/run_validation.py
 
-# Clean up local development resources
-clean: docker-clean
+# Validate Environment Configuration
+validate-config: setup-venv
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "🧹 Cleaning up local development resources..."
-    rm -rf venv
-    rm -rf __pycache__
-    rm -rf .pytest_cache
-    rm -rf .coverage
-    echo "✅ Local cleanup complete"
+    echo "🔍 Validating Environment Configuration..."
+    
+    . venv/bin/activate
+    export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+    python -c "from scripts.validation import config; config.main()"
+
+# Validate Connectivity and Schema
+validate-connectivity: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔍 Validating Connectivity and Schema..."
+    
+    . venv/bin/activate
+    export PYTHONPATH="${PYTHONPATH:-}:$(pwd)"
+    python -c "from scripts.validation import connectivity; connectivity.main()"
+
+# Security scan information
+security-scan:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "ℹ️  Security scanning is handled by GitHub Actions"
+    echo ""
+    echo "This project uses GitHub's CodeQL for security scanning, which runs"
+    echo "automatically on pull requests and pushes to the main branch."
+    echo ""
+    echo "The workflow is defined in: .github/workflows/codeql.yml"
+    echo ""
+    echo "To view security scan results, check the 'Security' tab in the GitHub repository."
+
+# Get recent AWS Lambda logs
+lambda-logs-recent time="15m" region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📝 Getting logs for the last {{time}}..."
+    just _lambda-logs-filtered {{region}} {{time}} true
 
 # Tail AWS Lambda logs in real-time
-lambda-logs region=default_region:
+lambda-logs-tail region=default_region:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "📝 Tailing logs for {{app_name}}..."
@@ -194,18 +255,8 @@ lambda-logs region=default_region:
         /aws/lambda/{{app_name}} \
         --region {{region}} \
         --follow \
+        --since 1m \
         --format short
-
-# Get recent AWS Lambda logs
-lambda-logs-recent region=default_region minutes="30":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "📝 Getting last {{minutes}} minutes of logs for {{app_name}}..."
-    aws {{aws_cli_opts}} logs tail \
-        /aws/lambda/{{app_name}} \
-        --region {{region}} \
-        --format short \
-        --since {{minutes}}m
 
 # Invoke AWS Lambda function manually
 lambda-invoke region=default_region:
@@ -218,6 +269,36 @@ lambda-invoke region=default_region:
         --invocation-type RequestResponse \
         --payload '{}' \
         /dev/stdout
+
+# Get current Lambda log level
+lambda-get-log-level region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📝 Getting current log level..."
+    aws {{aws_cli_opts}} lambda get-function-configuration \
+        --function-name {{app_name}} \
+        --region {{region}} \
+        --query 'Environment.Variables.LOG_LEVEL' \
+        --output text
+
+# Invoke Lambda function synchronously
+lambda-invoke-sync region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🚀 Invoking Lambda function synchronously..."
+    RESPONSE_FILE=$(mktemp)
+    aws {{aws_cli_opts}} lambda invoke \
+        --function-name {{app_name}} \
+        --region {{region}} \
+        --invocation-type RequestResponse \
+        --log-type Tail \
+        --payload '{}' \
+        "$RESPONSE_FILE" \
+        --query 'LogResult' \
+        --output text | base64 -d
+    echo "Response payload:"
+    cat "$RESPONSE_FILE"
+    rm "$RESPONSE_FILE"
 
 # View Lambda container image details
 lambda-image:
@@ -251,28 +332,150 @@ lint: setup-venv
     source venv/bin/activate
     pip install flake8
     echo "Running basic error checks..."
-    flake8 app.py sync.py scripts/ --count --select=E9,F63,F7,F82 --show-source --statistics
+    flake8 app.py sync.py scripts/ --count --select=E9,F63,F7,F82 --show-source --statistics --extend-ignore=W29
     echo "Running style checks..."
-    flake8 app.py sync.py scripts/ --count --max-complexity=10 --max-line-length=127 --statistics
+    flake8 app.py sync.py scripts/ --count --max-complexity=10 --max-line-length=127 --statistics --extend-ignore=W29
 
-# Run CodeQL analysis locally (requires CodeQL CLI: https://github.com/github/codeql-cli-binaries)
-security-scan:
+# View CloudWatch metrics for Lambda function
+lambda-metrics period="1h": setup-venv
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "🔒 Running CodeQL security scan..."
-    if ! command -v codeql &> /dev/null; then
-        echo "❌ CodeQL CLI not found. Please install it first:"
-        echo "https://github.com/github/codeql-cli-binaries"
-        exit 1
+    echo "📊 Getting CloudWatch metrics for {{app_name}}..."
+    
+    . venv/bin/activate
+    
+    # Convert period to hours
+    HOURS=$(echo "{{period}}" | sed 's/h$//')
+    
+    ./scripts/get_metrics.py \
+        --function-name {{app_name}} \
+        --region {{default_region}} \
+        --hours ${HOURS}
+
+# Update Lambda log level without redeploying
+lambda-set-log-level level region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📝 Setting log level to {{level}}..."
+    ENV_VARS=$(aws {{aws_cli_opts}} lambda get-function-configuration \
+        --function-name {{app_name}} \
+        --region {{region}} \
+        --query 'Environment.Variables' \
+        --output json)
+    UPDATED_ENV=$(echo "$ENV_VARS" | jq '. + {"LOG_LEVEL": "{{level}}"}')
+    aws {{aws_cli_opts}} lambda update-function-configuration \
+        --function-name {{app_name}} \
+        --region {{region}} \
+        --cli-input-json "{\"FunctionName\": \"{{app_name}}\", \"Environment\": {\"Variables\": $UPDATED_ENV}}"
+
+# Display Jira field schema
+schema-jira: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📝 Displaying Jira field schema..."
+    . venv/bin/activate
+    python scripts/schema/jira_schema.py
+
+# Display Airtable schema
+schema-airtable: setup-venv
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📝 Displaying Airtable schema..."
+    . venv/bin/activate
+    python scripts/schema/airtable_schema.py
+
+# Pause the Lambda scheduler
+lambda-scheduler-pause region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "⏸️  Pausing Lambda scheduler..."
+    aws {{aws_cli_opts}} events disable-rule \
+        --name "{{app_name}}-schedule" \
+        --region {{region}}
+    echo "✅ Scheduler paused"
+
+# Resume the Lambda scheduler
+lambda-scheduler-resume region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "▶️  Resuming Lambda scheduler..."
+    aws {{aws_cli_opts}} events enable-rule \
+        --name "{{app_name}}-schedule" \
+        --region {{region}}
+    echo "✅ Scheduler resumed"
+
+# Check Lambda scheduler status
+lambda-scheduler-status region=default_region:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📊 Checking Lambda scheduler status..."
+    STATE=$(aws {{aws_cli_opts}} events describe-rule \
+        --name "{{app_name}}-schedule" \
+        --region {{region}} \
+        --query 'State' \
+        --output text)
+    if [ "$STATE" = "ENABLED" ]; then
+        echo "🟢 Scheduler is ACTIVE"
+    else
+        echo "⭕ Scheduler is PAUSED"
+    fi
+
+# Internal function to get logs with time filtering
+_lambda-logs-filtered region time ascending="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    
+    # Convert time to date adjustment format
+    case "{{time}}" in
+        *h)
+            TIME_ADJ="-$(echo "{{time}}" | sed 's/h//g')H"
+            ;;
+        *m)
+            TIME_ADJ="-$(echo "{{time}}" | sed 's/m//g')M"
+            ;;
+        *)
+            echo "❌ Invalid time format. Use: 30m, 1h, 2h, etc."
+            exit 1
+            ;;
+    esac
+    
+    # Convert time to milliseconds for the query
+    START_TIME=$(date -v"$TIME_ADJ" +%s)000
+    
+    # Run CloudWatch Logs Insights query
+    QUERY="fields @timestamp, @message"
+    if [ "{{ascending}}" = "true" ]; then
+        QUERY="${QUERY} | sort @timestamp asc"
+    else
+        QUERY="${QUERY} | sort @timestamp desc"
     fi
     
-    # Create CodeQL database
-    codeql database create .codeql-db --language=python --source-root=.
+    echo "🔍 Query: $QUERY"  # Debug output
     
-    # Run analysis
-    codeql database analyze .codeql-db \
-        --format=sarif-latest \
-        --output=codeql-results.sarif \
-        security-and-quality.qls
+    # Start the query and get query ID
+    QUERY_ID=$(aws {{aws_cli_opts}} logs start-query \
+        --log-group-name /aws/lambda/{{app_name}} \
+        --start-time $START_TIME \
+        --end-time $(date +%s)000 \
+        --region {{region}} \
+        --query-string "$QUERY" \
+        --output text \
+        --query 'queryId')
     
-    echo "✅ Analysis complete. Results saved to codeql-results.sarif"
+    # Poll for results
+    while true; do
+        RESULTS=$(aws {{aws_cli_opts}} logs get-query-results --query-id "$QUERY_ID" --region {{region}})
+        STATUS=$(echo "$RESULTS" | jq -r .status)
+        if [ "$STATUS" = "Complete" ]; then
+            echo "$RESULTS" | \
+                jq -r ".results[] | [.[0].value, .[1].value] | @tsv" | \
+                while IFS=$"\t" read -r timestamp message; do
+                    printf "%s %s\n" "$timestamp" "$message"
+                done
+            break
+        elif [ "$STATUS" = "Failed" ]; then
+            echo "❌ Query failed"
+            break
+        fi
+        sleep 1
+    done

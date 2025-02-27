@@ -5,11 +5,21 @@ resource "aws_lambda_function" "mirror" {
   image_uri     = var.image_uri
   memory_size   = var.memory_size
   timeout       = var.timeout
+  image_config {
+    command           = ["app.lambda_handler"]
+    entry_point       = []
+    working_directory = "/var/task"
+  }
 
   architectures = ["x86_64"]
 
   environment {
-    variables = var.environment_variables
+    variables = merge(
+      {
+        ENVIRONMENT = "aws"
+      },
+      var.environment_variables
+    )
   }
   
   tags = var.tags
@@ -93,6 +103,94 @@ resource "aws_iam_role_policy" "secrets_access" {
   })
 }
 
+# SNS Topic for alarms
+resource "aws_sns_topic" "lambda_alarms" {
+  name = "${var.app_name}-alarms"
+  tags = var.tags
+}
+
+# Memory utilization alarms
+resource "aws_cloudwatch_metric_alarm" "memory_80" {
+  alarm_name          = "${var.app_name}-memory-utilization-80"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "1"
+  metric_name        = "memory_utilization"
+  namespace          = "AWS/Lambda"
+  period             = "300"  # 5 minutes
+  statistic          = "Maximum"
+  threshold          = "80"
+  alarm_description  = "Lambda function memory utilization is above 80%"
+  alarm_actions      = [aws_sns_topic.lambda_alarms.arn]
+  ok_actions         = [aws_sns_topic.lambda_alarms.arn]
+
+  dimensions = {
+    FunctionName = aws_lambda_function.mirror.function_name
+  }
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "memory_90" {
+  alarm_name          = "${var.app_name}-memory-utilization-90"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "1"
+  metric_name        = "memory_utilization"
+  namespace          = "AWS/Lambda"
+  period             = "300"  # 5 minutes
+  statistic          = "Maximum"
+  threshold          = "90"
+  alarm_description  = "Lambda function memory utilization is above 90%"
+  alarm_actions      = [aws_sns_topic.lambda_alarms.arn]
+  ok_actions         = [aws_sns_topic.lambda_alarms.arn]
+
+  dimensions = {
+    FunctionName = aws_lambda_function.mirror.function_name
+  }
+
+  tags = var.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "memory_95" {
+  alarm_name          = "${var.app_name}-memory-utilization-95"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "1"
+  metric_name        = "memory_utilization"
+  namespace          = "AWS/Lambda"
+  period             = "300"  # 5 minutes
+  statistic          = "Maximum"
+  threshold          = "95"
+  alarm_description  = "Lambda function memory utilization is above 95%"
+  alarm_actions      = [aws_sns_topic.lambda_alarms.arn]
+  ok_actions         = [aws_sns_topic.lambda_alarms.arn]
+
+  dimensions = {
+    FunctionName = aws_lambda_function.mirror.function_name
+  }
+
+  tags = var.tags
+}
+
+# Error rate alarm (good to have alongside memory alarms)
+resource "aws_cloudwatch_metric_alarm" "errors" {
+  alarm_name          = "${var.app_name}-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = "1"
+  metric_name        = "Errors"
+  namespace          = "AWS/Lambda"
+  period             = "300"  # 5 minutes
+  statistic          = "Sum"
+  threshold          = "0"
+  alarm_description  = "Lambda function has errors"
+  alarm_actions      = [aws_sns_topic.lambda_alarms.arn]
+  ok_actions         = [aws_sns_topic.lambda_alarms.arn]
+
+  dimensions = {
+    FunctionName = aws_lambda_function.mirror.function_name
+  }
+
+  tags = var.tags
+}
+
 # Outputs
 output "function_name" {
   description = "Name of the Lambda function"
@@ -112,4 +210,9 @@ output "role_arn" {
 output "cloudwatch_log_group_name" {
   description = "Name of the CloudWatch log group"
   value       = aws_cloudwatch_log_group.lambda.name
+}
+
+output "sns_topic_arn" {
+  description = "ARN of the SNS topic for Lambda alarms"
+  value       = aws_sns_topic.lambda_alarms.arn
 }

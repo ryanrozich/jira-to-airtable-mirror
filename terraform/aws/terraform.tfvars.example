@@ -13,22 +13,84 @@ airtable_base_id = "appXXXXXXXXXXXXXX"  # Found in your Airtable base URL
 airtable_table_name = "Your Table Name"
 
 # AWS Secrets Manager ARNs
+# These secrets should be created manually in AWS Secrets Manager before deploying
 jira_api_token_secret_arn = "arn:aws:secretsmanager:region:account:secret:jira-api-token-xxx"
 airtable_api_key_secret_arn = "arn:aws:secretsmanager:region:account:secret:airtable-api-key-xxx"
 
 # Sync Configuration
 sync_interval_minutes = "5"  # How often to sync
 max_results = 1000  # Maximum number of issues to sync
+batch_size = 50  # Number of records to process in each batch
 
-# Field Mapping
-jira_to_airtable_field_map = jsonencode({
-  "key": "fldXXX",           # Issue Key
-  "summary": "fldXXX",       # Summary
-  "description": "fldXXX",   # Description
-  "reporter": "fldXXX",      # Reporter
-  "assignee": "fldXXX",      # Assignee
-  "status": "fldXXX",        # Status
-  "created": "fldXXX",       # Created Date
-  "updated": "fldXXX",       # Last Updated Date
-  "parent": "fldXXX"         # Parent Issue (for subtasks)
-})
+# Logging
+log_level = "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
+
+# Field Mapping - using native HCL format which will be converted to JSON string
+jira_to_airtable_field_map = <<-EOT
+{
+  "key": {
+    "airtable_field_id": "fldUQtDhdyjmP6wYq",
+    "airtable_field_name": "JIRA Key"
+  },
+  "summary": {
+    "airtable_field_id": "fldf6Zuw6DuztuuxH",
+    "airtable_field_name": "Summary"
+  },
+  "description": {
+    "airtable_field_id": "fldMojFyPaoE62iVG",
+    "airtable_field_name": "Description"
+  },
+  "reporter": {
+    "airtable_field_id": "fldkfFMK3PzOZyOuC",
+    "airtable_field_name": "Reporter"
+  },
+  "assignee": {
+    "airtable_field_id": "fldNY8da3TNfuD9i0",
+    "airtable_field_name": "Assignee"
+  },
+  "issuetype": {
+    "airtable_field_id": "fldQQ9sF3RaOijIlJ",
+    "airtable_field_name": "Issue Type"
+  },
+  "status": {
+    "airtable_field_id": "fldceii2kXU97vPY9",
+    "airtable_field_name": "Status"
+  },
+  "parent": {
+    "airtable_field_id": "fldOzd4aHFR1RkQp3",
+    "airtable_field_name": "Parent Issue"
+  },
+  "created": {
+    "airtable_field_id": "fldyqGWJcluIQQHpV",
+    "airtable_field_name": "Date Created"
+  },
+  "updated": {
+    "airtable_field_id": "fldRmPLVKnZlZPIEu",
+    "airtable_field_name": "Last Updated"
+  },
+  "resolutiondate": {
+    "airtable_field_id": "fldH0i9ui1IUj9uoz",
+    "airtable_field_name": "Resolution Date"
+  },
+  "customfield_10016": {
+    "airtable_field_id": "fldGOl1crrsXRfNtX",
+    "airtable_field_name": "Sprint"
+  },
+  "comment_updated": {
+    "airtable_field_id": "fldvj8cqxBvrwnC1W",
+    "airtable_field_name": "Comment Updated"
+  },
+  "status_updated": {
+    "airtable_field_id": "fldG220Be8FAS3oxL",
+    "airtable_field_name": "Status Updated"
+  },
+  "latest_comment": {
+    "airtable_field_id": "fldkcXMxBUt9BAMUY",
+    "airtable_field_name": "Latest Comment"
+  },
+  "comment_author": {
+    "airtable_field_id": "fld71Ly4jX8jlsa6G",
+    "airtable_field_name": "Comment Author"
+  }
+}
+EOT

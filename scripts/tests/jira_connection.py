@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def test_jira_connection():
     """Test connection to Jira."""
     try:
-        load_dotenv()
+        load_dotenv(override=True)
 
         # Initialize Jira client
         jira = JIRA(
@@ -19,25 +19,25 @@ def test_jira_connection():
             basic_auth=(os.getenv('JIRA_USERNAME'), os.getenv('JIRA_API_TOKEN'))
         )
 
-        # Test connection by getting server info
-        server_info = jira.server_info()
-        logger.info(f"✅ Successfully connected to Jira {server_info['version']}")
-
-        # Test JQL query
+        # Test connection by getting server info and an issue
+        jira.server_info()
         jql = os.getenv('JIRA_JQL_FILTER', '')
         issues = jira.search_issues(jql, maxResults=1)
-
-        if issues:
-            logger.info(f"✅ Successfully retrieved issue {issues[0].key}")
-        else:
-            logger.warning("⚠️ No issues found with current JQL filter")
-
+        
         return True
 
     except Exception as e:
-        logger.error(f"❌ Connection test failed: {str(e)}")
+        logger.error(f"❌ Jira connection failed: {str(e)}")
         return False
 
 
+def main():
+    """Test Jira connection."""
+    try:
+        return test_jira_connection()
+    except Exception as e:
+        print(f"Error testing Jira connection: {str(e)}")
+        return False
+
 if __name__ == '__main__':
-    sys.exit(0 if test_jira_connection() else 1)
+    sys.exit(0 if main() else 1)

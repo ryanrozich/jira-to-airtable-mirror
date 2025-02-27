@@ -70,7 +70,7 @@ module "jira_mirror_lambda" {
 
   app_name    = "jira-to-airtable-mirror"
   image_uri   = "${local.ecr_repository_url}:latest"
-  memory_size = 512
+  memory_size = 256
   timeout     = 900  # 15 minutes
 
   environment_variables = {
@@ -83,7 +83,9 @@ module "jira_mirror_lambda" {
     AIRTABLE_TABLE_NAME    = var.airtable_table_name
     JIRA_TO_AIRTABLE_FIELD_MAP = var.jira_to_airtable_field_map
     MAX_RESULTS            = var.max_results
+    BATCH_SIZE             = var.batch_size
     TZ                     = "UTC"
+    LOG_LEVEL              = var.log_level
     JIRA_API_TOKEN_SECRET_ARN     = var.jira_api_token_secret_arn
     AIRTABLE_API_KEY_SECRET_ARN   = var.airtable_api_key_secret_arn
   }
@@ -111,6 +113,11 @@ output "lambda_function_name" {
 output "lambda_function_arn" {
   description = "ARN of the created Lambda function"
   value       = module.jira_mirror_lambda.function_arn
+}
+
+output "sns_topic_arn" {
+  description = "ARN of the SNS topic"
+  value       = module.jira_mirror_lambda.sns_topic_arn
 }
 
 output "ecr_repository_url" {

@@ -51,18 +51,30 @@ variable "airtable_api_key_secret_arn" {
 }
 
 variable "sync_interval_minutes" {
-  description = "How often to sync Jira issues (in minutes)"
+  description = "Interval in minutes between syncs"
   type        = string
   default     = "60"
 }
 
 variable "jira_to_airtable_field_map" {
-  description = "JSON string mapping Jira fields to Airtable field IDs"
+  description = "JSON mapping of Jira fields to Airtable field IDs"
   type        = string
 }
 
 variable "max_results" {
   description = "Maximum number of Jira issues to sync"
-  type        = number
-  default     = 1000
+  type        = string
+  default     = "1000"
+}
+
+variable "batch_size" {
+  description = "Number of records to process in each batch"
+  type        = string
+  default     = "50"
+}
+
+variable "log_level" {
+  description = "Log level for the Lambda function (DEBUG, INFO, WARNING, ERROR)"
+  type        = string
+  default     = "INFO"
 }

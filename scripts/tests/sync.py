@@ -8,11 +8,10 @@ from jira import JIRA
 
 logger = logging.getLogger(__name__)
 
-
 def test_sync():
     """Test sync process without writing to Airtable."""
     try:
-        load_dotenv()
+        load_dotenv(override=True)
 
         # Initialize Jira client
         jira = JIRA(
@@ -28,8 +27,6 @@ def test_sync():
             logger.warning("⚠️ No issues found with current JQL filter")
             return True
 
-        logger.info(f"\n✅ Successfully retrieved {len(issues)} issues from Jira")
-
         # Load field mappings
         field_map = json.loads(os.getenv('JIRA_TO_AIRTABLE_FIELD_MAP', '{}'))
         if not field_map:
@@ -37,19 +34,16 @@ def test_sync():
             return False
 
         # Test data transformation
-        logger.info("\nTesting data transformation (dry run):")
         for issue in issues:
-            logger.info(f"\nIssue {issue.key}:")
             record = {}
-            for jira_field, airtable_field in field_map.items():
+            for jira_field, mapping in field_map.items():
                 try:
                     value = getattr(issue.fields, jira_field, None)
+                    airtable_field = mapping.get('airtable_field_id')
                     record[airtable_field] = str(value) if value else None
-                    logger.info(f"  {jira_field} -> {airtable_field}: {record[airtable_field]}")
                 except AttributeError:
-                    logger.warning(f"  ⚠️ Warning: Field '{jira_field}' not found in Jira issue")
+                    logger.debug(f"Field '{jira_field}' not found in Jira issue {issue.key}")
 
-        logger.info("\n✅ Data transformation test completed successfully")
         return True
 
     except Exception as e:
@@ -57,5 +51,14 @@ def test_sync():
         return False
 
 
+def main():
+    """Test sync functionality."""
+    try:
+        return test_sync()
+    except Exception as e:
+        logger.error(f"Error testing sync functionality: {str(e)}")
+        return False
+
+
 if __name__ == '__main__':
-    sys.exit(0 if test_sync() else 1)
+    sys.exit(0 if main() else 1)
