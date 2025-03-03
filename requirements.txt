@@ -5,7 +5,7 @@ click==8.1.7
 apscheduler==3.11.0
 requests==2.32.3
 python-dateutil==2.8.2
-pytz==2024.2
+pytz==2025.1
 tabulate==0.9.0
 
 # Cloud Provider SDKs (Optional - only needed for AWS deployment)
