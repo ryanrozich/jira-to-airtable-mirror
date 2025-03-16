@@ -256,7 +256,9 @@ lambda-logs-tail region=default_region:
         --region {{region}} \
         --follow \
         --since 1m \
-        --format short
+        --format short | \
+        sed 's/\\t/    /g' | \
+        sed 's/\\n//g'
 
 # Invoke AWS Lambda function manually
 lambda-invoke region=default_region:
@@ -470,7 +472,9 @@ _lambda-logs-filtered region time ascending="false":
             echo "$RESULTS" | \
                 jq -r ".results[] | [.[0].value, .[1].value] | @tsv" | \
                 while IFS=$"\t" read -r timestamp message; do
-                    printf "%s %s\n" "$timestamp" "$message"
+                    # Replace literal \t with proper spacing and remove \n in the message
+                    formatted_message=$(echo "$message" | sed 's/\\t/    /g' | sed 's/\\n//g')
+                    printf "%s %s\n" "$timestamp" "$formatted_message"
                 done
             break
         elif [ "$STATUS" = "Failed" ]; then
