@@ -16,7 +16,11 @@ ignore =
     # W504: line break after binary operator
     W504,
     # E501: line too long
-    E501
+    E501,
+    # W291: trailing whitespace
+    W291,
+    # W293: blank line contains whitespace
+    W293
 exclude =
     .git,
     __pycache__,
