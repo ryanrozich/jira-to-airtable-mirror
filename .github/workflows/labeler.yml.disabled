@@ -1,0 +1,18 @@
+# This workflow is currently disabled due to compatibility issues
+# Rename to labeler.yml to re-enable
+name: "Pull Request Labeler.disabled"
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  triage:
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/labeler@v4
+      with:
+        repo-token: "${{ secrets.GITHUB_TOKEN }}"
+        configuration-path: .github/labeler.yml

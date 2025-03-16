@@ -56,7 +56,10 @@ class JiraAirtableSync:
         self._populate_field_names()
         
         # Log initialization details
-        logger.info(f"Initializing sync from Jira project {self.config.jira_project_key} to Airtable table {config.airtable_table_name}")
+        logger.info(
+            f"Initializing sync from Jira project {self.config.jira_project_key} "
+            f"to Airtable table {config.airtable_table_name}"
+        )
         logger.info(f"Jira Server: {config.jira_server}")
         logger.info(f"Airtable Base: {config.airtable_base_id}")
         logger.info(f"Using batch size of {config.batch_size} for Airtable operations")
@@ -180,8 +183,7 @@ class JiraAirtableSync:
             
             # Format to Jira's supported minute precision
             formatted = local_dt.strftime('%Y-%m-%d %H:%M')
-            logger.debug(f"Converting timestamp from UTC ({timestamp}) to "
-                        f"Jira instance timezone {self._get_jira_timezone()} ({formatted})")
+            logger.debug(f"Converting timestamp from UTC ({timestamp}) to Jira instance timezone {self._get_jira_timezone()} ({formatted})")
             return formatted
         except Exception as e:
             logger.error(f"Error formatting timestamp {timestamp}: {e}")
@@ -461,9 +463,8 @@ class JiraAirtableSync:
         if field_name == 'latest_comment':
             return latest_comment.body
         elif field_name == 'comment_author':
-            return (latest_comment.author.displayName 
-                   if hasattr(latest_comment.author, 'displayName') 
-                   else str(latest_comment.author))
+            author = latest_comment.author
+            return author.displayName if hasattr(author, 'displayName') else str(author)
         elif field_name == 'comment_updated':
             return latest_comment.updated
         return None
@@ -702,6 +703,66 @@ class JiraAirtableSync:
         logger.info(f"Found {len(key_to_record_id)} existing records in Airtable")
         return key_to_record_id
 
+    def _get_issue_key(self, issue: Any) -> Optional[str]:
+        """
+        Extract the key from a Jira issue, handling both dictionary and object formats.
+        
+        Args:
+            issue: Jira issue (object or dictionary)
+            
+        Returns:
+            Issue key or None if key cannot be found
+        """
+        if isinstance(issue, dict):
+            # For dictionary format, get the key from the field ID that corresponds to "key"
+            key_field_id = self._get_airtable_field_id('key')
+            if not key_field_id or key_field_id not in issue:
+                logger.warning(f"Could not find key field in issue: {issue}")
+                return None
+            return issue[key_field_id]
+        else:
+            # For object format, get the key directly
+            return issue.key
+    
+    def _create_new_records(self, records_to_create: List[Dict]):
+        """
+        Create new records in Airtable.
+        
+        Args:
+            records_to_create: List of records to create
+        """
+        if not records_to_create:
+            return
+            
+        logger.info(f"Creating {len(records_to_create)} new records")
+        try:
+            created, failed = self._batch_create_with_progress(records_to_create)
+            logger.info(f"Created {created} new records")
+            if failed:
+                logger.warning(f"Failed to create {len(failed)} records: {failed}")
+        except Exception as e:
+            logger.error(f"Error creating records: {str(e)}")
+            raise
+    
+    def _update_existing_records(self, records_to_update: List[Dict]):
+        """
+        Update existing records in Airtable.
+        
+        Args:
+            records_to_update: List of records to update
+        """
+        if not records_to_update:
+            return
+            
+        logger.info(f"Updating {len(records_to_update)} existing records")
+        try:
+            # The records_to_update is now in the format expected by batch_update
+            self.table.batch_update(records_to_update)
+            logger.info(f"Updated {len(records_to_update)} records")
+        except Exception as e:
+            logger.error(f"Error updating records: {str(e)}")
+            raise
+
     def _process_issue_batch(self, issues: List[Any], existing_record_ids: Dict[str, str]) -> None:
         """
         Process a batch of Jira issues and sync them to Airtable.
@@ -715,52 +776,26 @@ class JiraAirtableSync:
         keys_to_process = set()
 
         for issue in issues:
-            # Handle both dictionary and object formats
-            if isinstance(issue, dict):
-                # For dictionary format, get the key from the field ID that corresponds to "key"
-                key_field_id = self._get_airtable_field_id('key')
-                key = issue.get(key_field_id)
-                if not key:
-                    logger.warning(f"Could not find Jira key in issue dictionary using field ID {key_field_id}")
-                    continue
-            else:
-                # For object format, get the key directly
-                key = issue.key
+            issue_key = self._get_issue_key(issue)
+            if not issue_key:
+                continue
                 
-            keys_to_process.add(key)
+            keys_to_process.add(issue_key)
             record_data = self._convert_issue_to_record(issue)
 
             # Check if this issue already exists in Airtable
-            if key in existing_record_ids and existing_record_ids[key]:
+            if issue_key in existing_record_ids and existing_record_ids[issue_key]:
                 # Update existing record
-                record_id = existing_record_ids[key]
+                record_id = existing_record_ids[issue_key]
                 records_to_update.append({"id": record_id, "fields": record_data})
-                logger.debug(f"Updating existing record for {key} (Airtable ID: {record_id})")
+                logger.debug(f"Updating existing record for {issue_key} (Airtable ID: {record_id})")
             else:
                 # Create new record
                 records_to_create.append(record_data)
-                logger.debug(f"Creating new record for {key}")
+                logger.debug(f"Creating new record for {issue_key}")
         
-        if records_to_create:
-            logger.info(f"Creating {len(records_to_create)} new records")
-            try:
-                created, failed = self._batch_create_with_progress(records_to_create)
-                logger.info(f"Created {created} new records")
-                if failed:
-                    logger.warning(f"Failed to create {len(failed)} records: {failed}")
-            except Exception as e:
-                logger.error(f"Error creating records: {str(e)}")
-                raise
-
-        if records_to_update:
-            logger.info(f"Updating {len(records_to_update)} existing records")
-            try:
-                # The records_to_update is now in the format expected by batch_update
-                self.table.batch_update(records_to_update)
-                logger.info(f"Updated {len(records_to_update)} records")
-            except Exception as e:
-                logger.error(f"Error updating records: {str(e)}")
-                raise
+        self._create_new_records(records_to_create)
+        self._update_existing_records(records_to_update)
 
         # Update parent relationships after all records are created/updated
         self._update_parent_relationships(issues, existing_record_ids)
@@ -848,7 +883,7 @@ class JiraAirtableSync:
             try:
                 logger.info(f"Updating {len(parent_updates)} parent relationships")
                 self.table.batch_update(parent_updates)
-                logger.info(f"Successfully updated parent relationships")
+                logger.info("Successfully updated parent relationships")
             except Exception as e:
                 logger.error(f"Error updating parent relationships: {str(e)}")
 

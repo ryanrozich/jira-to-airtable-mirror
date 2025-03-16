@@ -22,7 +22,8 @@ def test_jira_connection():
         # Test connection by getting server info and an issue
         jira.server_info()
         jql = os.getenv('JIRA_JQL_FILTER', '')
-        issues = jira.search_issues(jql, maxResults=1)
+        # Just check if search works, we don't need the results
+        jira.search_issues(jql, maxResults=1)
         
         return True
 

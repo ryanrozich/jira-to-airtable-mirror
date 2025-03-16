@@ -3,7 +3,6 @@
 import json
 import statistics
 import sys
-from datetime import datetime
 from typing import Dict, Any
 
 from tabulate import tabulate

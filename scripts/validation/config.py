@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 import os
-import sys
 import json
+import sys
+import logging
 from typing import List, Tuple, Dict, Any
 import shutil
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
 
 def validate_field_mapping_schema(field_map: Dict[str, Any]) -> Tuple[bool, List[str]]:
     """Validate the schema of field mappings."""
@@ -65,6 +69,7 @@ def validate_field_mapping_schema(field_map: Dict[str, Any]) -> Tuple[bool, List
     
     return len(errors) == 0, errors
 
+
 def check_env_file() -> Tuple[bool, str, str]:
     """Check if .env file exists and create it from example if not."""
     if os.path.exists('.env'):
@@ -87,6 +92,7 @@ def check_env_file() -> Tuple[bool, str, str]:
     3. Edit .env with your configuration
     """
 
+
 def check_jira_config() -> Tuple[bool, str, List[str]]:
     """Validate Jira configuration."""
     required_vars = {
@@ -105,6 +111,7 @@ def check_jira_config() -> Tuple[bool, str, List[str]]:
         return False, "Missing Jira configuration", missing_vars
     return True, "Jira configuration complete", []
 
+
 def check_airtable_config() -> Tuple[bool, str, List[str]]:
     """Validate Airtable configuration."""
     required_vars = {
@@ -121,6 +128,7 @@ def check_airtable_config() -> Tuple[bool, str, List[str]]:
     if missing_vars:
         return False, "Missing Airtable configuration", missing_vars
     return True, "Airtable configuration complete", []
+
 
 def check_field_mappings() -> Tuple[bool, str, str]:
     """Validate field mappings configuration."""
@@ -198,6 +206,7 @@ def check_field_mappings() -> Tuple[bool, str, str]:
         If the error persists, please report this issue.
         """
 
+
 def main():
     """Run all configuration validation checks."""
     load_dotenv()
@@ -225,6 +234,7 @@ def main():
     
     print()  # Add blank line at the end
     return all_passed
+
 
 if __name__ == '__main__':
     sys.exit(0 if main() else 1)
