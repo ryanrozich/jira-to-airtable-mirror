@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import subprocess
 import sys
-import json
 import os
-from typing import List, Tuple
+from typing import Tuple
 import boto3
+
 
 def check_aws_cli() -> Tuple[bool, str, str]:
     """Check if AWS CLI is installed and configured."""
@@ -35,12 +35,13 @@ def check_aws_cli() -> Tuple[bool, str, str]:
         2. Run 'aws configure' to set up credentials
         """
     except Exception as e:
-        return False, f"AWS CLI error: {str(e)}", """
+        return False, "AWS CLI error: " + str(e), """
         To fix:
         1. Ensure your AWS credentials are valid
         2. Check if your AWS account is active
         3. Verify you have necessary permissions
         """
+
 
 def check_terraform() -> Tuple[bool, str, str]:
     """Check if Terraform is installed."""
@@ -56,11 +57,12 @@ def check_terraform() -> Tuple[bool, str, str]:
         2. Verify installation: terraform --version
         """
     except subprocess.CalledProcessError as e:
-        return False, f"Terraform error: {str(e)}", """
+        return False, "Terraform error: " + str(e), """
         To fix:
         1. Try reinstalling Terraform
         2. Check if Terraform binary is corrupted
         """
+
 
 def check_terraform_config() -> Tuple[bool, str, str]:
     """Check if terraform.tfvars exists and contains required variables."""
@@ -84,7 +86,7 @@ def check_terraform_config() -> Tuple[bool, str, str]:
         missing_vars = []
         for var, description in required_vars.items():
             if var not in tfvars_content:
-                missing_vars.append(f"- {var}: {description}")
+                missing_vars.append("- " + var + ": " + description)
         
         if missing_vars:
             fix_instructions = """
@@ -93,13 +95,13 @@ def check_terraform_config() -> Tuple[bool, str, str]:
                cp terraform/aws/terraform.tfvars.example terraform/aws/terraform.tfvars
             
             2. Add the following missing variables to terraform.tfvars:
-            {}
+            """ + "\n            ".join(missing_vars) + """
             
             3. For secret ARNs:
                - Create secrets in AWS Secrets Manager
                - Copy the ARNs to terraform.tfvars
-            """.format('\n            '.join(missing_vars))
-            return False, f"Missing required variables in terraform.tfvars", fix_instructions
+            """
+            return False, "Missing required variables in terraform.tfvars", fix_instructions
         return True, "terraform.tfvars is properly configured", ""
     except FileNotFoundError:
         return False, "terraform.tfvars not found", """
@@ -108,6 +110,7 @@ def check_terraform_config() -> Tuple[bool, str, str]:
            cp terraform/aws/terraform.tfvars.example terraform/aws/terraform.tfvars
         2. Edit terraform.tfvars and fill in your configuration values
         """
+
 
 def check_aws_permissions() -> Tuple[bool, str, str]:
     """Check if AWS user has required permissions."""
@@ -129,7 +132,7 @@ def check_aws_permissions() -> Tuple[bool, str, str]:
         return True, "AWS user has required permissions", ""
     except Exception as e:
         service = str(e).split('.')[0] if '.' in str(e) else 'unknown'
-        return False, f"Missing AWS permissions: {str(e)}", f"""
+        return False, "Missing AWS permissions: " + str(e), """
         To fix:
         1. Ensure your AWS user has these permissions:
            - Amazon ECR: Full access
@@ -137,13 +140,14 @@ def check_aws_permissions() -> Tuple[bool, str, str]:
            - AWS Secrets Manager: Read access
            - Amazon EventBridge: Full access
         
-        2. Add missing permissions for {service}:
+        2. Add missing permissions for """ + service + """ :
            - Ask your AWS administrator to grant necessary permissions
            - Or update your IAM policy to include required actions
         """
 
-def main():
-    """Run all AWS prerequisite checks."""
+
+def run_aws_validation():
+    """Run all AWS validation checks and return the results."""
     checks = [
         ("AWS CLI", check_aws_cli()),
         ("Terraform", check_terraform()),
@@ -162,13 +166,13 @@ def main():
         else:
             print(f"\n   {status} {name}:")
         print(f"      {message}")
-        if not passed:
-            print("      How to fix:")
+        
+        if not passed and fix:
             print(f"      {fix}")
-            all_passed = False
     
     print()  # Add blank line at the end
     return all_passed
 
-if __name__ == '__main__':
-    sys.exit(0 if main() else 1)
+
+if __name__ == "__main__":
+    sys.exit(0 if run_aws_validation() else 1)

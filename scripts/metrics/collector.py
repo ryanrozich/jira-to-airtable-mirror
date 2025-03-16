@@ -2,7 +2,7 @@
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 
 import boto3

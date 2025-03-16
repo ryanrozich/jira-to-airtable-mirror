@@ -1,0 +1,25 @@
+[flake8]
+max-line-length = 140
+ignore = 
+    # E302: expected 2 blank lines, found 1
+    E302,
+    # E305: expected 2 blank lines after class or function definition, found 1
+    E305,
+    # E128: continuation line under-indented for visual indent
+    E128,
+    # E303: too many blank lines
+    E303,
+    # C901: function is too complex
+    C901,
+    # E226: missing whitespace around arithmetic operator
+    E226,
+    # W504: line break after binary operator
+    W504,
+    # E501: line too long
+    E501
+exclude =
+    .git,
+    __pycache__,
+    build,
+    dist,
+    venv
