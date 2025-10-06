@@ -1,4 +1,4 @@
-jira==3.8.0
+jira==3.10.5
 pyairtable==3.0.2
 python-dotenv==1.0.0
 click==8.1.7
